@@ -1,0 +1,7 @@
+services:
+  - type: worker
+    name: tg-swap-bot
+    runtime: python
+    buildCommand: pip install aiogram python-dotenv httpx aiosqlite
+    startCommand: python main.py
+    plan: free
