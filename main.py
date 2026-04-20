@@ -10,7 +10,7 @@ from aiohttp import web
 
 from config import BOT_TOKEN, WEBHOOK_HOST, WEBHOOK_PATH, WEBHOOK_URL
 from database.db import init_db
-from handlers import start, exchange, status, admin
+from handlers import start, exchange, status, admin, buywithcard, language
 from services.checker import check_swaps
 from services.logger import setup_logging
 from services.webhook import create_app
@@ -52,8 +52,10 @@ async def main():
     dp = Dispatcher(storage=MemoryStorage())
     dp.include_router(start.router)
     dp.include_router(exchange.router)
+    dp.include_router(language.router)
     dp.include_router(status.router)
     dp.include_router(admin.router)
+    dp.include_router(buywithcard.router)
 
     await on_startup(bot, dp)
 

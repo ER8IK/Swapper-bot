@@ -23,8 +23,33 @@ async def init_db():
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        # Таблица для хранения языка пользователя
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS user_settings (
+                user_id INTEGER PRIMARY KEY,
+                lang TEXT DEFAULT 'en'
+            )
+        """)
         await db.commit()
-    logger.info("Database initialized")
+
+
+async def get_user_lang(user_id: int) -> str:
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            "SELECT lang FROM user_settings WHERE user_id = ?", (user_id,)
+        )
+        row = await cursor.fetchone()
+        return row[0] if row else "en"
+
+
+async def set_user_lang(user_id: int, lang: str):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("""
+            INSERT INTO user_settings (user_id, lang)
+            VALUES (?, ?)
+            ON CONFLICT(user_id) DO UPDATE SET lang = excluded.lang
+        """, (user_id, lang))
+        await db.commit()
 
 
 async def save_swap(user_id: int, exchange_id: str, currency_from: str,

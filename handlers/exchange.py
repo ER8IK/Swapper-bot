@@ -227,13 +227,6 @@ async def enter_address(message: Message, state: FSMContext):
         )
         return
 
-    if not re.match(r'^[a-zA-Z0-9]+$', address):
-        await message.answer(
-            "⚠️ Address contains invalid characters.\n"
-            "<i>Type /cancel to abort</i>",
-            reply_markup=cancel_keyboard()
-        )
-        return
 
     await state.update_data(address_to=address)
     await state.set_state(ExchangeStates.confirm)

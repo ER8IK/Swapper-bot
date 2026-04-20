@@ -2,11 +2,13 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from services.currencies import CRYPTO_CURRENCIES, FIAT_CURRENCIES
 
 
-def main_menu() -> InlineKeyboardMarkup:
+def main_menu(lang: str = "en") -> InlineKeyboardMarkup:
+    from services.i18n import t
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🔄 Swap crypto", callback_data="action_swap")],
-        [InlineKeyboardButton(text="💳 Buy with card", callback_data="action_fiat")],
-        [InlineKeyboardButton(text="ℹ️ How it works", callback_data="action_how")],
+        [InlineKeyboardButton(text=t(lang, "btn_swap"), callback_data="action_swap")],
+        [InlineKeyboardButton(text=t(lang, "btn_buy_card"), callback_data="action_fiat")],
+        [InlineKeyboardButton(text=t(lang, "btn_how"), callback_data="action_how")],
+        [InlineKeyboardButton(text=t(lang, "btn_language"), callback_data="action_language")],
     ])
 
 
