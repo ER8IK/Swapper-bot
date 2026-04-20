@@ -95,30 +95,52 @@ async def get_estimated(
     fixed: bool = False
 ) -> dict | None:
     try:
+        # Проверяем, является ли валюта фиатной (обычно USD, EUR, GBP)
+        is_fiat = ticker_from.lower() in ["usd", "eur", "gbp"]
+        
+        # Для фиата API SimpleSwap часто требует эндпоинт без /v3 или специальный флаг
+        # Но главное — это обработка результата ниже
+        url = f"{BASE_URL}/v3/estimates"
+        
+        params = {
+            "tickerFrom": ticker_from.lower(),
+            "networkFrom": network_from.lower() if network_from else "",
+            "tickerTo": ticker_to.lower(),
+            "networkTo": network_to.lower() if network_to else "",
+            "amount": amount,
+            "fixed": str(fixed).lower(), # API любит строки "true"/"false"
+        }
+
         data = await _request_with_retry(
             "GET",
-            f"{BASE_URL}/v3/estimates",
-            params={
-                "tickerFrom": ticker_from,
-                "networkFrom": network_from,
-                "tickerTo": ticker_to,
-                "networkTo": network_to,
-                "amount": amount,
-                "fixed": fixed,
-            },
+            url,
+            params=params,
             headers={"x-api-key": SIMPLESWAP_API_KEY},
         )
 
         if not data:
             return None
 
+        # SimpleSwap v3 возвращает объект с полем "result"
         result = data.get("result") if isinstance(data, dict) else None
-        if not result or not isinstance(result, dict):
-            logger.error(f"Unexpected estimate response: {data}")
+        
+        if not result:
+            # Если API вернуло ошибку (например, сумма мала), логгируем её
+            logger.error(f"API Error Response: {data}")
             return None
 
-        estimated = result.get("estimatedAmount") or result.get("estimated")
+        # КРИТИЧЕСКОЕ ИЗМЕНЕНИЕ ТУТ:
+        # Для крипты поле называется 'estimatedAmount'
+        # Для фиата поле ЧАСТО называется 'estimatedAmountTo' или просто 'amountTo'
+        estimated = (
+            result.get("estimatedAmount") or 
+            result.get("estimated") or 
+            result.get("amountTo") or 
+            result.get("estimatedAmountTo")
+        )
+
         if estimated is None:
+            logger.error(f"Could not find estimated amount in result: {result}")
             return None
 
         return {
