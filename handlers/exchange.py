@@ -2,7 +2,7 @@ from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
 from aiogram.exceptions import TelegramBadRequest
-from aiogram.filters import Command
+from aiogram.filters import Command, Filter
 import re
 
 from states import ExchangeStates
@@ -24,6 +24,16 @@ ADDRESS_MIN_LENGTH = {
     "btc": 25, "eth": 42, "usdt": 42,
     "sol": 32, "bnb": 42, "trx": 34,
 }
+
+
+# ---------------------------------------------------------------------------
+# Кастомный фильтр: пропускает только если is_fiat == False
+# ---------------------------------------------------------------------------
+
+class IsNotFiat(Filter):
+    async def __call__(self, update: CallbackQuery | Message, state: FSMContext) -> bool:
+        data = await state.get_data()
+        return not data.get("is_fiat", False)
 
 
 # ---------------------------------------------------------------------------
@@ -84,7 +94,7 @@ async def start_swap(callback: CallbackQuery, state: FSMContext):
 @router.callback_query(ExchangeStates.waiting_currency_from, F.data.startswith("from_"))
 async def choose_from(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
-    parts = callback.data.split("_")          # from_btc_btc  or  from_usdt_eth
+    parts = callback.data.split("_")
     ticker = parts[1]
     network = parts[2]
     currency = get_currency(ticker, network)
@@ -106,16 +116,12 @@ async def choose_from(callback: CallbackQuery, state: FSMContext):
 
 
 # ---------------------------------------------------------------------------
-# Step 3 — Choose TO
+# Step 3 — Choose TO (только крипто-флоу, фиат отсекается фильтром)
 # ---------------------------------------------------------------------------
 
-@router.callback_query(ExchangeStates.waiting_currency_to, F.data.startswith("to_"))
+@router.callback_query(ExchangeStates.waiting_currency_to, F.data.startswith("to_"), IsNotFiat())
 async def choose_to(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
-    data = await state.get_data()
-    if data.get("is_fiat"):
-        return  # фиатный флоу — пусть buywithcard.py обрабатывает
-
     parts = callback.data.split("_")
     ticker = parts[1]
     network = parts[2]
@@ -143,16 +149,14 @@ async def choose_to(callback: CallbackQuery, state: FSMContext):
 
 
 # ---------------------------------------------------------------------------
-# Step 4 — Enter amount
+# Step 4 — Enter amount (только крипто-флоу)
 # ---------------------------------------------------------------------------
 
-@router.message(ExchangeStates.waiting_amount)
+@router.message(ExchangeStates.waiting_amount, IsNotFiat())
 async def enter_amount(message: Message, state: FSMContext):
     data = await state.get_data()
     if not data.get("currency_from"):
         return
-    if data.get("is_fiat"):
-        return  # фиатный флоу
 
     try:
         amount = float(message.text.replace(",", "."))
@@ -213,16 +217,13 @@ async def enter_amount(message: Message, state: FSMContext):
 
 
 # ---------------------------------------------------------------------------
-# Step 5 — Enter address
+# Step 5 — Enter address (только крипто-флоу)
 # ---------------------------------------------------------------------------
 
-@router.message(ExchangeStates.waiting_address)
+@router.message(ExchangeStates.waiting_address, IsNotFiat())
 async def enter_address(message: Message, state: FSMContext):
-    data = await state.get_data()
-    if data.get("is_fiat"):
-        return  # фиатный флоу
-
     address = message.text.strip()
+    data = await state.get_data()
     currency_to = data.get("currency_to", "")
     min_len = ADDRESS_MIN_LENGTH.get(currency_to, 10)
 
@@ -249,17 +250,13 @@ async def enter_address(message: Message, state: FSMContext):
 
 
 # ---------------------------------------------------------------------------
-# Step 6 — Confirm
+# Step 6 — Confirm (только крипто-флоу)
 # ---------------------------------------------------------------------------
 
-@router.callback_query(ExchangeStates.confirm, F.data == "confirm_yes")
+@router.callback_query(ExchangeStates.confirm, F.data == "confirm_yes", IsNotFiat())
 async def confirm_exchange(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
     data = await state.get_data()
-
-    # Игнорируем, если это фиатный флоу — его обрабатывает buywithcard.py
-    if data.get("is_fiat"):
-        return
 
     await callback.message.edit_text("⏳ Creating exchange...")
 
@@ -306,15 +303,9 @@ async def confirm_exchange(callback: CallbackQuery, state: FSMContext):
     )
 
 
-@router.callback_query(ExchangeStates.confirm, F.data == "confirm_no")
+@router.callback_query(ExchangeStates.confirm, F.data == "confirm_no", IsNotFiat())
 async def cancel_exchange(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
-    data = await state.get_data()
-
-    # Игнорируем, если это фиатный флоу
-    if data.get("is_fiat"):
-        return
-
     await state.clear()
     await callback.message.edit_text(
         "❌ Exchange cancelled.",
