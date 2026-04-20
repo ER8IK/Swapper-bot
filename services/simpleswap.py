@@ -95,52 +95,37 @@ async def get_estimated(
     fixed: bool = False
 ) -> dict | None:
     try:
-        # Проверяем, является ли валюта фиатной (обычно USD, EUR, GBP)
-        is_fiat = ticker_from.lower() in ["usd", "eur", "gbp"]
-        
-        # Для фиата API SimpleSwap часто требует эндпоинт без /v3 или специальный флаг
-        # Но главное — это обработка результата ниже
-        url = f"{BASE_URL}/v3/estimates"
-        
+        ticker_from = ticker_from.lower()
+        # Для фиата ВСЕГДА ставим fixed=True, так как платежные шлюзы не работают с плавающим курсом
+        is_fiat = ticker_from in ["usd", "eur", "gbp"]
+        if is_fiat:
+            fixed = True
+
         params = {
-            "tickerFrom": ticker_from.lower(),
+            "tickerFrom": ticker_from,
             "networkFrom": network_from.lower() if network_from else "",
             "tickerTo": ticker_to.lower(),
             "networkTo": network_to.lower() if network_to else "",
             "amount": amount,
-            "fixed": str(fixed).lower(), # API любит строки "true"/"false"
+            "fixed": str(fixed).lower(),
         }
 
         data = await _request_with_retry(
             "GET",
-            url,
+            f"{BASE_URL}/v3/estimates",
             params=params,
             headers={"x-api-key": SIMPLESWAP_API_KEY},
         )
 
-        if not data:
+        # Если API выдало ошибку (например, из-за лимита), мы увидим это в логах
+        if not data or "result" not in data:
+            logger.error(f"QUOTE ERROR: {data}") # Смотри сюда в терминале!
             return None
 
-        # SimpleSwap v3 возвращает объект с полем "result"
-        result = data.get("result") if isinstance(data, dict) else None
-        
-        if not result:
-            # Если API вернуло ошибку (например, сумма мала), логгируем её
-            logger.error(f"API Error Response: {data}")
-            return None
-
-        # КРИТИЧЕСКОЕ ИЗМЕНЕНИЕ ТУТ:
-        # Для крипты поле называется 'estimatedAmount'
-        # Для фиата поле ЧАСТО называется 'estimatedAmountTo' или просто 'amountTo'
-        estimated = (
-            result.get("estimatedAmount") or 
-            result.get("estimated") or 
-            result.get("amountTo") or 
-            result.get("estimatedAmountTo")
-        )
+        result = data["result"]
+        estimated = result.get("estimatedAmount") or result.get("amountTo") or result.get("estimatedAmountTo")
 
         if estimated is None:
-            logger.error(f"Could not find estimated amount in result: {result}")
             return None
 
         return {
