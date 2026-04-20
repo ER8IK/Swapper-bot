@@ -12,15 +12,17 @@ def main_menu(lang: str = "en") -> InlineKeyboardMarkup:
     ])
 
 
-def back_to_menu() -> InlineKeyboardMarkup:
+def back_to_menu(lang: str = "en") -> InlineKeyboardMarkup:
+    from services.i18n import t
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🔙 Back to menu", callback_data="action_back")]
+        [InlineKeyboardButton(text=t(lang, "btn_back"), callback_data="action_back")]
     ])
 
 
-def cancel_keyboard() -> InlineKeyboardMarkup:
+def cancel_keyboard(lang: str = "en") -> InlineKeyboardMarkup:
+    from services.i18n import t
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="❌ Cancel", callback_data="action_cancel")]
+        [InlineKeyboardButton(text=t(lang, "btn_cancel"), callback_data="action_cancel")]
     ])
 
 
@@ -78,10 +80,11 @@ def fiat_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
-def confirm_keyboard() -> InlineKeyboardMarkup:
+def confirm_keyboard(lang: str = "en") -> InlineKeyboardMarkup:
+    from services.i18n import t
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="✅ Confirm", callback_data="confirm_yes"),
-            InlineKeyboardButton(text="❌ Cancel", callback_data="confirm_no"),
+            InlineKeyboardButton(text=t(lang, "btn_confirm"), callback_data="confirm_yes"),
+            InlineKeyboardButton(text=t(lang, "btn_cancel"), callback_data="confirm_no"),
         ]
     ])
