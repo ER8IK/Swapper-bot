@@ -27,12 +27,12 @@ STATUS_EMOJI = {
 async def cmd_status(message: Message):
     exchange_id = message.text.split("_", 1)[1].strip()
 
-    await message.answer("⏳ Проверяю статус...")
+    await message.answer("⏳ Checking status...")
 
     result = await get_exchange(exchange_id)
 
     if not result:
-        await message.answer("❌ Обмен не найден. Проверь ID и попробуй снова.")
+        await message.answer("❌ Exchange not found. Check the ID and try again.")
         return
 
     status = result.get("status", "unknown")
@@ -47,12 +47,12 @@ async def cmd_status(message: Message):
     ticker_to = result.get("tickerTo") or result.get("currency_to", "—")
 
     await message.answer(
-        f"{emoji} <b>Статус обмена</b>\n\n"
+        f"{emoji} <b>Exchange Status</b>\n\n"
         f"ID: <code>{exchange_id}</code>\n"
-        f"Статус: <b>{status}</b>\n\n"
-        f"Отдаёшь: <b>{amount_from} {ticker_from.upper()}</b>\n"
-        f"Получаешь: <b>{amount_to} {ticker_to.upper()}</b>\n\n"
-        f"Адрес для отправки:\n<code>{address_from}</code>",
+        f"Status: <b>{status}</b>\n\n"
+        f"You send: <b>{amount_from} {ticker_from.upper()}</b>\n"
+        f"You receive: <b>{amount_to} {ticker_to.upper()}</b>\n\n"
+        f"Send to address:\n<code>{address_from}</code>",
         reply_markup=back_to_menu()
     )
 
@@ -63,11 +63,11 @@ async def cmd_history(message: Message):
 
     if not swaps:
         await message.answer(
-            "📭 У тебя пока нет обменов.\n\nНажми /start чтобы начать."
+            "📭 You have no exchanges yet.\n\nPress /start to begin."
         )
         return
 
-    text = "📋 <b>Твои последние обмены:</b>\n\n"
+    text = "📋 <b>Your recent exchanges:</b>\n\n"
 
     for swap in swaps:
         status = swap.get("status", "unknown")

@@ -1,6 +1,8 @@
 import httpx
 from config import SIMPLESWAP_API_KEY
 import logging
+import time
+
 
 logger = logging.getLogger(__name__)
 
@@ -21,23 +23,29 @@ NETWORKS = {
 # ---------------------------------------------------------------------------
 
 async def _request_with_retry(method: str, url: str, retries: int = 3, **kwargs) -> dict | None:
-    """Make an HTTP request with retry on timeout."""
     for attempt in range(retries):
         try:
+            start = time.monotonic()
             async with httpx.AsyncClient() as client:
                 resp = await client.request(method, url, timeout=10, **kwargs)
+                elapsed = round((time.monotonic() - start) * 1000)
                 resp.raise_for_status()
-                return resp.json()
+                data = resp.json()
+                logger.info(f"[API] {method} {url} → {resp.status_code} ({elapsed}ms)")
+                return data
         except httpx.TimeoutException:
-            logger.warning(f"Timeout on attempt {attempt + 1} for {url}")
+            logger.warning(f"[API] Timeout attempt {attempt + 1} — {url}")
             if attempt == retries - 1:
-                logger.error(f"All {retries} attempts failed (timeout): {url}")
+                logger.error(f"[API] All {retries} attempts failed: {url}")
                 return None
         except httpx.HTTPStatusError as e:
-            logger.error(f"HTTP error {e.response.status_code} for {url}: {e.response.text}")
+            logger.error(
+                f"[API] HTTP {e.response.status_code} — {url} "
+                f"| body: {e.response.text[:200]}"
+            )
             return None
         except Exception as e:
-            logger.error(f"Request error: {e}")
+            logger.error(f"[API] Request error: {e}")
             return None
     return None
 
@@ -80,20 +88,13 @@ async def get_pairs(fixed: bool = False) -> list:
 
 async def get_estimated(
     ticker_from: str,
+    network_from: str,
     ticker_to: str,
+    network_to: str,
     amount: str,
     fixed: bool = False
 ) -> dict | None:
-    """Get exchange quote from SimpleSwap."""
     try:
-        pairs = await get_pairs()
-        network_from = _get_network_for_ticker(ticker_from, pairs)
-        network_to = _get_network_for_ticker(ticker_to, pairs)
-
-        if not network_from or not network_to:
-            logger.error(f"Unknown network for {ticker_from} or {ticker_to}")
-            return None
-
         data = await _request_with_retry(
             "GET",
             f"{BASE_URL}/v3/estimates",
@@ -118,13 +119,11 @@ async def get_estimated(
 
         estimated = result.get("estimatedAmount") or result.get("estimated")
         if estimated is None:
-            logger.error(f"No estimated amount in response: {result}")
             return None
 
         return {
             "estimatedAmountTo": float(estimated),
             "rateId": result.get("rateId"),
-            "validUntil": result.get("validUntil"),
         }
 
     except Exception as e:
@@ -134,20 +133,14 @@ async def get_estimated(
 
 async def create_exchange(
     ticker_from: str,
+    network_from: str,
     ticker_to: str,
+    network_to: str,
     amount: str,
     address_to: str,
     fixed: bool = False,
     rate_id: str | None = None,
 ) -> dict | None:
-    """Create an exchange on SimpleSwap."""
-    network_from = NETWORKS.get(ticker_from.lower())
-    network_to = NETWORKS.get(ticker_to.lower())
-
-    if not network_from or not network_to:
-        logger.error(f"Unknown network for {ticker_from} or {ticker_to}")
-        return None
-
     payload = {
         "tickerFrom": ticker_from,
         "networkFrom": network_from,
