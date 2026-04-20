@@ -10,7 +10,7 @@ from services.currencies import FIAT_CURRENCIES, CRYPTO_CURRENCIES, get_currency
 from services.limiter import limiter
 from database.db import save_swap
 from keyboards.inline import (
-    back_to_menu, cancel_keyboard, confirm_keyboard,
+    back_to_menu, cancel_keyboard, fiat_confirm_keyboard,
     fiat_keyboard, crypto_to_keyboard
 )
 
@@ -183,11 +183,11 @@ async def enter_fiat_address(message: Message, state: FSMContext):
         f"You receive: <b>≈{data['amount_to']} {data['label_to']}</b>\n"
         f"Address: <code>{address}</code>\n\n"
         f"Everything correct?",
-        reply_markup=confirm_keyboard()
+        reply_markup=fiat_confirm_keyboard() 
     )
 
 
-@router.callback_query(ExchangeStates.confirm, F.data == "confirm_yes")
+@router.callback_query(ExchangeStates.confirm, F.data == "fiat_confirm_yes") 
 async def confirm_fiat_exchange(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
     data = await state.get_data()
@@ -246,7 +246,7 @@ async def confirm_fiat_exchange(callback: CallbackQuery, state: FSMContext):
         )
 
 
-@router.callback_query(ExchangeStates.confirm, F.data == "confirm_no")
+@router.callback_query(ExchangeStates.confirm, F.data == "fiat_confirm_no") 
 async def cancel_fiat(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
     await state.clear()

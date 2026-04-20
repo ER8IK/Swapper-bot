@@ -247,6 +247,10 @@ async def enter_address(message: Message, state: FSMContext):
 
 @router.callback_query(ExchangeStates.confirm, F.data == "confirm_yes")
 async def confirm_exchange(callback: CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    if data.get("is_fiat"): 
+        return 
+    
     await callback.answer()
     data = await state.get_data()
     await callback.message.edit_text("⏳ Creating exchange...")
@@ -296,6 +300,10 @@ async def confirm_exchange(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(ExchangeStates.confirm, F.data == "confirm_no")
 async def cancel_exchange(callback: CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    if data.get("is_fiat"): 
+        return
+
     await callback.answer()
     await state.clear()
     await callback.message.edit_text(

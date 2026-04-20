@@ -24,6 +24,17 @@ def cancel_keyboard(lang: str = "en") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=t(lang, "btn_cancel"), callback_data="action_cancel")]
     ])
+    
+# Добавь эту функцию в keyboards/inline.py
+
+def fiat_confirm_keyboard(lang: str = "en") -> InlineKeyboardMarkup:
+    from services.i18n import t
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text=t(lang, "btn_confirm"), callback_data="fiat_confirm_yes"),
+            InlineKeyboardButton(text=t(lang, "btn_cancel"), callback_data="fiat_confirm_no"),
+        ]
+    ])
 
 
 def crypto_from_keyboard(exclude_ticker: str = None,
