@@ -154,32 +154,49 @@ async def create_exchange(
     fixed: bool = False,
     rate_id: str | None = None,
 ) -> dict | None:
-    payload = {
-        "tickerFrom": ticker_from,
-        "networkFrom": network_from,
-        "tickerTo": ticker_to,
-        "networkTo": network_to,
-        "amount": amount,
-        "addressTo": address_to,
-        "fixed": fixed,
-    }
-    if rate_id:
-        payload["rateId"] = rate_id
+    try:
+        # 1. Принудительно чистим параметры, как мы это сделали для get_estimated
+        t_from = ticker_from.lower()
+        n_from = network_from.lower() if network_from else ""
+        t_to = ticker_to.lower()
+        n_to = network_to.lower() if network_to else ""
 
-    data = await _request_with_retry(
-        "POST",
-        f"{BASE_URL}/v3/exchanges",
-        json=payload,
-        headers={"x-api-key": SIMPLESWAP_API_KEY},
-    )
+        payload = {
+            "tickerFrom": t_from,
+            "networkFrom": n_from,
+            "tickerTo": t_to,
+            "networkTo": n_to,
+            "amount": amount,
+            "addressTo": address_to.strip(),
+            "fixed": fixed,
+        }
+        if rate_id:
+            payload["rateId"] = rate_id
 
-    if not data:
+        # 2. Логируем, что именно отправляем
+        logger.info(f"DEBUG CREATE PAYLOAD: {payload}")
+
+        data = await _request_with_retry(
+            "POST",
+            f"{BASE_URL}/v3/exchanges",
+            json=payload,
+            headers={"x-api-key": SIMPLESWAP_API_KEY},
+        )
+
+        # 3. Логируем ответ, если API ругается
+        if not data or (isinstance(data, dict) and "result" not in data):
+            logger.error(f"!!! CREATE ERROR FULL RESPONSE: {data}")
+            return None
+
+        # Возвращаем результат
+        if isinstance(data, dict) and "result" in data:
+            return data["result"]
+            
+        return data
+        
+    except Exception as e:
+        logger.error(f"create_exchange error: {e}")
         return None
-
-    if isinstance(data, dict) and isinstance(data.get("result"), dict):
-        return data["result"]
-
-    return data
 
 
 async def get_exchange(public_id: str) -> dict | None:
