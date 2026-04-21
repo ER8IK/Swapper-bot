@@ -95,20 +95,23 @@ async def get_estimated(
     fixed: bool = False
 ) -> dict | None:
     try:
-        ticker_from = ticker_from.lower()
-        # Для фиата ВСЕГДА ставим fixed=True, так как платежные шлюзы не работают с плавающим курсом
-        is_fiat = ticker_from in ["usd", "eur", "gbp"]
-        if is_fiat:
-            fixed = True
+        # Принудительно в нижний регистр
+        t_from = ticker_from.lower()
+        n_from = network_from.lower() if network_from else ""
+        t_to = ticker_to.lower()
+        n_to = network_to.lower() if network_to else ""
 
         params = {
-            "tickerFrom": ticker_from,
-            "networkFrom": network_from.lower() if network_from else "",
-            "tickerTo": ticker_to.lower(),
-            "networkTo": network_to.lower() if network_to else "",
+            "tickerFrom": t_from,
+            "networkFrom": n_from,
+            "tickerTo": t_to,
+            "networkTo": n_to,
             "amount": amount,
             "fixed": str(fixed).lower(),
         }
+
+        # Логируем, что именно мы отправляем
+        logger.info(f"DEBUG SENDING PARAMS: {params}")
 
         data = await _request_with_retry(
             "GET",
@@ -117,13 +120,15 @@ async def get_estimated(
             headers={"x-api-key": SIMPLESWAP_API_KEY},
         )
 
-        # Если API выдало ошибку (например, из-за лимита), мы увидим это в логах
         if not data or "result" not in data:
-            logger.error(f"QUOTE ERROR full response: {data}")
+            # ЭТО САМАЯ ВАЖНАЯ СТРОКА СЕЙЧАС:
+            logger.error(f"!!! QUOTE ERROR FULL RESPONSE: {data}")
             return None
 
         result = data["result"]
-        logger.info(f"QUOTE RESULT FULL: {result}")  # ← добавь эту строку
+        # Логируем успешный ответ для отладки полей
+        logger.info(f"!!! QUOTE SUCCESS FULL RESULT: {result}")
+
         estimated = result.get("estimatedAmount") or result.get("amountTo") or result.get("estimatedAmountTo")
 
         if estimated is None:
