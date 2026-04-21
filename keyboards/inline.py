@@ -22,7 +22,7 @@ def back_to_menu(lang: str = "en") -> InlineKeyboardMarkup:
 def cancel_keyboard(lang: str = "en") -> InlineKeyboardMarkup:
     from services.i18n import t
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=t(lang, "btn_cancel"), callback_data="action_cancel")]
+        [InlineKeyboardButton(text=t(lang, "btn_back"), callback_data="action_back")]
     ])
     
 # Добавь эту функцию в keyboards/inline.py
@@ -54,7 +54,7 @@ def crypto_from_keyboard(exclude_ticker: str = None,
             row = []
     if row:
         buttons.append(row)
-    buttons.append([InlineKeyboardButton(text="❌ Cancel", callback_data="action_cancel")])
+    buttons.append([InlineKeyboardButton(text="⬅️ Back", callback_data="action_back")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
@@ -75,7 +75,7 @@ def crypto_to_keyboard(exclude_ticker: str = None,
             row = []
     if row:
         buttons.append(row)
-    buttons.append([InlineKeyboardButton(text="❌ Cancel", callback_data="action_cancel")])
+    buttons.append([InlineKeyboardButton(text="⬅️ Back", callback_data="action_back")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
