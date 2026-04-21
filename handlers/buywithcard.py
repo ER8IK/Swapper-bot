@@ -212,6 +212,7 @@ async def confirm_fiat_exchange(callback: CallbackQuery, state: FSMContext):
     )
 
     if not result:
+        logger.info(f"FIAT RESULT FULL: {result}")
         # Логируем в консоль бота, чтобы видеть реальную причину (например, API key error)
         logger.error(f"SimpleSwap Fiat Error for user {callback.from_user.id}: result is None")
         await callback.message.edit_text(

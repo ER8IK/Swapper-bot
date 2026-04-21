@@ -119,10 +119,11 @@ async def get_estimated(
 
         # Если API выдало ошибку (например, из-за лимита), мы увидим это в логах
         if not data or "result" not in data:
-            logger.error(f"QUOTE ERROR: {data}") # Смотри сюда в терминале!
+            logger.error(f"QUOTE ERROR full response: {data}")
             return None
 
         result = data["result"]
+        logger.info(f"QUOTE RESULT FULL: {result}")  # ← добавь эту строку
         estimated = result.get("estimatedAmount") or result.get("amountTo") or result.get("estimatedAmountTo")
 
         if estimated is None:
