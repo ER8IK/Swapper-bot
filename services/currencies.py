@@ -11,8 +11,8 @@ CRYPTO_CURRENCIES = [
 ]
 
 FIAT_CURRENCIES = [
-    {"ticker": "usd", "network": "", "label": "💵 USD", "min": 20.0},
-    {"ticker": "eur", "network": "", "label": "💶 EUR", "min": 20.0},
+    {"ticker": "usd", "network": "usd", "label": "💵 USD", "min": 20.0},
+    {"ticker": "eur", "network": "eur", "label": "💶 EUR", "min": 20.0},
 ]
 
 # Словарь для быстрого поиска сети по тикеру (первая попавшаяся)
