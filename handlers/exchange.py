@@ -7,6 +7,7 @@ import re
 
 from states import ExchangeStates
 from services import simpleswap
+# Функции теперь async, поэтому вызываем их с await ниже
 from services.currencies import get_currency, get_min_amount, currency_key
 from services.limiter import limiter
 from database.db import save_swap
@@ -78,9 +79,10 @@ async def start_swap(callback: CallbackQuery, state: FSMContext):
     await state.set_state(ExchangeStates.waiting_currency_from)
     await state.update_data(is_fiat=False)
     try:
+        # ИСПРАВЛЕНО: добавлен await для клавиатуры
         await callback.message.edit_text(
             "🔄 <b>New swap</b>\n\nChoose the currency you want to <b>send</b>:",
-            reply_markup=crypto_from_keyboard()
+            reply_markup=await crypto_from_keyboard()
         )
     except TelegramBadRequest as e:
         if "message is not modified" not in str(e):
@@ -97,7 +99,9 @@ async def choose_from(callback: CallbackQuery, state: FSMContext):
     parts = callback.data.split("_")
     ticker = parts[1]
     network = parts[2]
-    currency = get_currency(ticker, network)
+    
+    # ИСПРАВЛЕНО: добавлен await
+    currency = await get_currency(ticker, network)
     if not currency:
         await callback.answer("Unknown currency", show_alert=True)
         return
@@ -108,15 +112,17 @@ async def choose_from(callback: CallbackQuery, state: FSMContext):
         label_from=currency["label"]
     )
     await state.set_state(ExchangeStates.waiting_currency_to)
+    
+    # ИСПРАВЛЕНО: добавлен await для клавиатуры
     await callback.message.edit_text(
         f"✅ Sending: <b>{currency['label']}</b>\n\n"
         f"Choose the currency you want to <b>receive</b>:",
-        reply_markup=crypto_to_keyboard(exclude_ticker=ticker, exclude_network=network)
+        reply_markup=await crypto_to_keyboard(exclude_ticker=ticker, exclude_network=network)
     )
 
 
 # ---------------------------------------------------------------------------
-# Step 3 — Choose TO (только крипто-флоу, фиат отсекается фильтром)
+# Step 3 — Choose TO
 # ---------------------------------------------------------------------------
 
 @router.callback_query(ExchangeStates.waiting_currency_to, F.data.startswith("to_"), IsNotFiat())
@@ -125,7 +131,9 @@ async def choose_to(callback: CallbackQuery, state: FSMContext):
     parts = callback.data.split("_")
     ticker = parts[1]
     network = parts[2]
-    currency = get_currency(ticker, network)
+    
+    # ИСПРАВЛЕНО: добавлен await
+    currency = await get_currency(ticker, network)
     if not currency:
         await callback.answer("Unknown currency", show_alert=True)
         return
@@ -137,7 +145,9 @@ async def choose_to(callback: CallbackQuery, state: FSMContext):
     )
     await state.set_state(ExchangeStates.waiting_amount)
     data = await state.get_data()
-    min_amount = get_min_amount(data["currency_from"], data["network_from"])
+    
+    # ИСПРАВЛЕНО: добавлен await
+    min_amount = await get_min_amount(data["currency_from"], data["network_from"])
 
     await callback.message.edit_text(
         f"✅ Receiving: <b>{currency['label']}</b>\n\n"
@@ -149,7 +159,7 @@ async def choose_to(callback: CallbackQuery, state: FSMContext):
 
 
 # ---------------------------------------------------------------------------
-# Step 4 — Enter amount (только крипто-флоу)
+# Step 4 — Enter amount
 # ---------------------------------------------------------------------------
 
 @router.message(ExchangeStates.waiting_amount, IsNotFiat())
@@ -159,7 +169,8 @@ async def enter_amount(message: Message, state: FSMContext):
         return
 
     try:
-        amount = float(message.text.replace(",", "."))
+        amount_str = message.text.replace(",", ".")
+        amount = float(amount_str)
         if amount <= 0:
             raise ValueError
     except ValueError:
@@ -169,7 +180,9 @@ async def enter_amount(message: Message, state: FSMContext):
         )
         return
 
-    min_amount = get_min_amount(data["currency_from"], data["network_from"])
+    # ИСПРАВЛЕНО: добавлен await
+    min_amount = await get_min_amount(data["currency_from"], data["network_from"])
+    
     if amount < min_amount:
         await message.answer(
             f"⚠️ Amount too small.\n\n"
@@ -217,7 +230,7 @@ async def enter_amount(message: Message, state: FSMContext):
 
 
 # ---------------------------------------------------------------------------
-# Step 5 — Enter address (только крипто-флоу)
+# Step 5 — Enter address
 # ---------------------------------------------------------------------------
 
 @router.message(ExchangeStates.waiting_address, IsNotFiat())
@@ -250,7 +263,7 @@ async def enter_address(message: Message, state: FSMContext):
 
 
 # ---------------------------------------------------------------------------
-# Step 6 — Confirm (только крипто-флоу)
+# Step 6 — Confirm
 # ---------------------------------------------------------------------------
 
 @router.callback_query(ExchangeStates.confirm, F.data == "confirm_yes", IsNotFiat())
