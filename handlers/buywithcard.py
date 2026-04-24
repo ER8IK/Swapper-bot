@@ -6,7 +6,7 @@ from aiogram.filters import Command
 
 from states import ExchangeStates
 from services import simpleswap
-from services.currencies import FIAT_CURRENCIES, CRYPTO_CURRENCIES, get_currency, get_min_amount
+from services.currencies import get_fiat_currencies, get_crypto_currencies, get_currency, get_min_amount
 from services.limiter import limiter
 from database.db import save_swap
 from keyboards.inline import (
