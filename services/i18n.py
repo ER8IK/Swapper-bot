@@ -14,8 +14,8 @@ TEXTS = {
             "5. Получаешь обмененные монеты 🎉\n\n"
             "<i>Powered by SimpleSwap</i>"
         ),
-        "btn_swap": "🔄 Swap",
-        "btn_buy_card": "💳 Buy with card",
+        "btn_swap": "🔄 Обменять",
+        "btn_buy_card": "💳 Купить картой",
         "btn_how": "ℹ️ Как это работает?",
         "btn_back": "🔙 Назад",
         "btn_cancel": "❌ Отмена",
