@@ -7,6 +7,8 @@ logger = logging.getLogger(__name__)
 DB_PATH = "swaps.db"
 
 
+# ── Init ───────────────────────────────────────────────────────────────────────
+
 async def init_db():
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("""
@@ -23,15 +25,58 @@ async def init_db():
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
-        # Таблица для хранения языка пользователя
         await db.execute("""
             CREATE TABLE IF NOT EXISTS user_settings (
                 user_id INTEGER PRIMARY KEY,
                 lang TEXT DEFAULT 'en'
             )
         """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS currencies (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ticker TEXT NOT NULL,
+                network TEXT NOT NULL,
+                label TEXT NOT NULL,
+                min_amount REAL NOT NULL DEFAULT 0.0,
+                is_fiat INTEGER NOT NULL DEFAULT 0,
+                is_active INTEGER NOT NULL DEFAULT 1,
+                sort_order INTEGER NOT NULL DEFAULT 0
+            )
+        """)
         await db.commit()
 
+        # Seed default currencies if table is empty
+        cursor = await db.execute("SELECT COUNT(*) FROM currencies")
+        count = (await cursor.fetchone())[0]
+        if count == 0:
+            await _seed_currencies(db)
+
+    logger.info("Database initialized")
+
+
+async def _seed_currencies(db):
+    """Insert default currencies on first run."""
+    defaults = [
+        ("btc",  "btc",  "BTC",           0.0001, 0, 1, 1),
+        ("eth",  "eth",  "ETH",            0.005,  0, 1, 2),
+        ("usdt", "trx",  "USDT (TRC20)",   1.0,    0, 1, 3),
+        ("usdt", "eth",  "USDT (ERC20)",  10.0,    0, 1, 4),
+        ("sol",  "sol",  "SOL",            0.1,    0, 1, 5),
+        ("bnb",  "bsc",  "BNB",            0.01,   0, 1, 6),
+        ("trx",  "trx",  "TRX",           50.0,    0, 1, 7),
+        ("usd",  "usd",  "💵 USD",        20.0,    1, 1, 8),
+        ("eur",  "eur",  "💶 EUR",        20.0,    1, 1, 9),
+    ]
+    await db.executemany("""
+        INSERT INTO currencies
+            (ticker, network, label, min_amount, is_fiat, is_active, sort_order)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+    """, defaults)
+    await db.commit()
+    logger.info("Default currencies seeded")
+
+
+# ── Language ───────────────────────────────────────────────────────────────────
 
 async def get_user_lang(user_id: int) -> str:
     async with aiosqlite.connect(DB_PATH) as db:
@@ -52,13 +97,16 @@ async def set_user_lang(user_id: int, lang: str):
         await db.commit()
 
 
+# ── Swaps ──────────────────────────────────────────────────────────────────────
+
 async def save_swap(user_id: int, exchange_id: str, currency_from: str,
                     currency_to: str, amount_from: float, amount_to: float,
                     address_to: str) -> int:
     async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute("""
-            INSERT INTO swaps (user_id, exchange_id, currency_from, currency_to,
-                               amount_from, amount_to, address_to)
+            INSERT INTO swaps
+                (user_id, exchange_id, currency_from, currency_to,
+                 amount_from, amount_to, address_to)
             VALUES (?, ?, ?, ?, ?, ?, ?)
         """, (user_id, exchange_id, currency_from, currency_to,
               amount_from, amount_to, address_to))
@@ -75,9 +123,100 @@ async def get_user_swaps(user_id: int) -> list:
         )
         rows = await cursor.fetchall()
         return [dict(row) for row in rows]
-    
+
+
+async def update_swap_status(exchange_id: str, status: str):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE swaps SET status = ? WHERE exchange_id = ?",
+            (status, exchange_id)
+        )
+        await db.commit()
+
+
+async def get_active_swaps() -> list:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute("""
+            SELECT * FROM swaps
+            WHERE status NOT IN ('finished', 'failed', 'refunded', 'expired')
+            AND exchange_id IS NOT NULL
+            ORDER BY created_at DESC
+        """)
+        rows = await cursor.fetchall()
+        return [dict(row) for row in rows]
+
+
+async def get_all_swaps(limit: int = 10) -> list:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            "SELECT * FROM swaps ORDER BY created_at DESC LIMIT ?", (limit,)
+        )
+        rows = await cursor.fetchall()
+        return [dict(row) for row in rows]
+
+
+# ── Stats ──────────────────────────────────────────────────────────────────────
+
+async def get_stats() -> dict:
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute("SELECT COUNT(*) FROM swaps")
+        total = (await cursor.fetchone())[0]
+
+        cursor = await db.execute(
+            "SELECT COUNT(*) FROM swaps WHERE status = 'finished'"
+        )
+        finished = (await cursor.fetchone())[0]
+
+        cursor = await db.execute(
+            "SELECT COUNT(*) FROM swaps WHERE status IN "
+            "('waiting','confirming','exchanging','sending')"
+        )
+        pending = (await cursor.fetchone())[0]
+
+        cursor = await db.execute(
+            "SELECT COUNT(*) FROM swaps WHERE status IN ('failed','expired')"
+        )
+        failed = (await cursor.fetchone())[0]
+
+        cursor = await db.execute(
+            "SELECT COUNT(DISTINCT user_id) FROM swaps"
+        )
+        users = (await cursor.fetchone())[0]
+
+        today     = datetime.now().strftime("%Y-%m-%d")
+        week_ago  = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
+        month_ago = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
+
+        cursor = await db.execute(
+            "SELECT COUNT(*) FROM swaps WHERE DATE(created_at) = ?", (today,)
+        )
+        today_count = (await cursor.fetchone())[0]
+
+        cursor = await db.execute(
+            "SELECT COUNT(*) FROM swaps WHERE DATE(created_at) >= ?", (week_ago,)
+        )
+        week_count = (await cursor.fetchone())[0]
+
+        cursor = await db.execute(
+            "SELECT COUNT(*) FROM swaps WHERE DATE(created_at) >= ?", (month_ago,)
+        )
+        month_count = (await cursor.fetchone())[0]
+
+        return {
+            "total":    total,
+            "finished": finished,
+            "pending":  pending,
+            "failed":   failed,
+            "users":    users,
+            "today":    today_count,
+            "week":     week_count,
+            "month":    month_count,
+        }
+
+
 async def get_top_pairs(limit: int = 5) -> list:
-    """Top trading pairs by volume."""
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         cursor = await db.execute("""
@@ -96,126 +235,30 @@ async def get_top_pairs(limit: int = 5) -> list:
         return [dict(row) for row in rows]
 
 
-
-async def update_swap_status(exchange_id: str, status: str):
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute(
-            "UPDATE swaps SET status = ? WHERE exchange_id = ?",
-            (status, exchange_id)
-        )
-        await db.commit()
-        
 async def get_average_amount() -> float:
-    """Average exchange amount."""
     async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute(
             "SELECT AVG(amount_from) FROM swaps WHERE status = 'finished'"
         )
         result = (await cursor.fetchone())[0]
         return round(result, 6) if result else 0.0
-    
+
+
 async def get_volume_by_period(days: int) -> dict:
-    """Exchange count and unique users for a given period."""
     async with aiosqlite.connect(DB_PATH) as db:
         since = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
         cursor = await db.execute("""
-            SELECT
-                COUNT(*) as count,
-                COUNT(DISTINCT user_id) as users
+            SELECT COUNT(*) as count, COUNT(DISTINCT user_id) as users
             FROM swaps
             WHERE DATE(created_at) >= ? AND status = 'finished'
         """, (since,))
         row = await cursor.fetchone()
         return {"count": row[0], "users": row[1]}
-        
-async def get_all_swaps(limit: int = 10) -> list:
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        cursor = await db.execute(
-            "SELECT * FROM swaps ORDER BY created_at DESC LIMIT ?",
-            (limit,)
-        )
-        rows = await cursor.fetchall()
-        return [dict(row) for row in rows]
 
 
-async def get_stats() -> dict:
-    """General stats for admin panel."""
-    async with aiosqlite.connect(DB_PATH) as db:
-        # Всего
-        cursor = await db.execute("SELECT COUNT(*) FROM swaps")
-        total = (await cursor.fetchone())[0]
+# ── Logs ───────────────────────────────────────────────────────────────────────
 
-        # По статусам
-        cursor = await db.execute(
-            "SELECT COUNT(*) FROM swaps WHERE status = 'finished'"
-        )
-        finished = (await cursor.fetchone())[0]
-
-        cursor = await db.execute(
-            "SELECT COUNT(*) FROM swaps WHERE status IN "
-            "('waiting', 'confirming', 'exchanging', 'sending')"
-        )
-        pending = (await cursor.fetchone())[0]
-
-        cursor = await db.execute(
-            "SELECT COUNT(*) FROM swaps WHERE status IN ('failed', 'expired')"
-        )
-        failed = (await cursor.fetchone())[0]
-
-        # Уникальные пользователи
-        cursor = await db.execute(
-            "SELECT COUNT(DISTINCT user_id) FROM swaps"
-        )
-        users = (await cursor.fetchone())[0]
-
-        # За сегодня
-        today = datetime.now().strftime("%Y-%m-%d")
-        cursor = await db.execute(
-            "SELECT COUNT(*) FROM swaps WHERE DATE(created_at) = ?", (today,)
-        )
-        today_count = (await cursor.fetchone())[0]
-
-        # За неделю
-        week_ago = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
-        cursor = await db.execute(
-            "SELECT COUNT(*) FROM swaps WHERE DATE(created_at) >= ?", (week_ago,)
-        )
-        week_count = (await cursor.fetchone())[0]
-
-        # За месяц
-        month_ago = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
-        cursor = await db.execute(
-            "SELECT COUNT(*) FROM swaps WHERE DATE(created_at) >= ?", (month_ago,)
-        )
-        month_count = (await cursor.fetchone())[0]
-
-        return {
-            "total": total,
-            "finished": finished,
-            "pending": pending,
-            "failed": failed,
-            "users": users,
-            "today": today_count,
-            "week": week_count,
-            "month": month_count,
-        }
-    
-async def get_active_swaps() -> list:
-    """Get all swaps that are not in a final state."""
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        cursor = await db.execute("""
-            SELECT * FROM swaps
-            WHERE status NOT IN ('finished', 'failed', 'refunded', 'expired')
-            AND exchange_id IS NOT NULL
-            ORDER BY created_at DESC
-        """)
-        rows = await cursor.fetchall()
-        return [dict(row) for row in rows]
-    
 async def get_recent_logs(n: int = 20) -> list[str]:
-    """Read last N lines from bot.log."""
     log_path = os.path.join("logs", "bot.log")
     if not os.path.exists(log_path):
         return ["Log file not found."]
@@ -225,3 +268,80 @@ async def get_recent_logs(n: int = 20) -> list[str]:
         return [l.strip() for l in lines[-n:] if l.strip()]
     except Exception as e:
         return [f"Error reading logs: {e}"]
+
+
+# ── Currency management ────────────────────────────────────────────────────────
+
+async def get_currencies(fiat_only=False, crypto_only=False, active_only=True) -> list:
+    """Get currencies with optional filters."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        query = "SELECT * FROM currencies WHERE 1=1"
+        if active_only:
+            query += " AND is_active = 1"
+        if fiat_only:
+            query += " AND is_fiat = 1"
+        if crypto_only:
+            query += " AND is_fiat = 0"
+        query += " ORDER BY sort_order ASC"
+        cursor = await db.execute(query)
+        rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
+
+
+async def get_all_currencies_admin() -> list:
+    """All currencies including inactive — for admin panel."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            "SELECT * FROM currencies ORDER BY is_fiat ASC, sort_order ASC"
+        )
+        rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
+
+
+async def add_currency(ticker: str, network: str, label: str,
+                       min_amount: float, is_fiat: bool) -> int:
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute("SELECT MAX(sort_order) FROM currencies")
+        max_order = (await cursor.fetchone())[0] or 0
+        cursor = await db.execute("""
+            INSERT INTO currencies
+                (ticker, network, label, min_amount, is_fiat, is_active, sort_order)
+            VALUES (?, ?, ?, ?, ?, 1, ?)
+        """, (ticker.lower(), network.lower(), label, min_amount, int(is_fiat), max_order + 1))
+        await db.commit()
+        return cursor.lastrowid
+
+
+async def toggle_currency(currency_id: int) -> bool:
+    """Toggle active/inactive. Returns new state as bool."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            "SELECT is_active FROM currencies WHERE id = ?", (currency_id,)
+        )
+        row = await cursor.fetchone()
+        if not row:
+            return False
+        new_state = 0 if row[0] else 1
+        await db.execute(
+            "UPDATE currencies SET is_active = ? WHERE id = ?",
+            (new_state, currency_id)
+        )
+        await db.commit()
+        return bool(new_state)
+
+
+async def update_currency_min(currency_id: int, min_amount: float):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "UPDATE currencies SET min_amount = ? WHERE id = ?",
+            (min_amount, currency_id)
+        )
+        await db.commit()
+
+
+async def delete_currency(currency_id: int):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("DELETE FROM currencies WHERE id = ?", (currency_id,))
+        await db.commit()

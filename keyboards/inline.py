@@ -1,13 +1,12 @@
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from services.currencies import CRYPTO_CURRENCIES, FIAT_CURRENCIES
 
 
 def main_menu(lang: str = "en") -> InlineKeyboardMarkup:
     from services.i18n import t
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=t(lang, "btn_swap"), callback_data="action_swap")],
+        [InlineKeyboardButton(text=t(lang, "btn_swap"),     callback_data="action_swap")],
         [InlineKeyboardButton(text=t(lang, "btn_buy_card"), callback_data="action_fiat")],
-        [InlineKeyboardButton(text=t(lang, "btn_how"), callback_data="action_how")],
+        [InlineKeyboardButton(text=t(lang, "btn_how"),      callback_data="action_how")],
         [InlineKeyboardButton(text=t(lang, "btn_language"), callback_data="action_language")],
     ])
 
@@ -24,25 +23,37 @@ def cancel_keyboard(lang: str = "en") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=t(lang, "btn_back"), callback_data="action_back")]
     ])
-    
-# Добавь эту функцию в keyboards/inline.py
+
+
+def confirm_keyboard(lang: str = "en") -> InlineKeyboardMarkup:
+    from services.i18n import t
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text=t(lang, "btn_confirm"), callback_data="confirm_yes"),
+            InlineKeyboardButton(text=t(lang, "btn_cancel"),  callback_data="confirm_no"),
+        ]
+    ])
+
 
 def fiat_confirm_keyboard(lang: str = "en") -> InlineKeyboardMarkup:
     from services.i18n import t
     return InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(text=t(lang, "btn_confirm"), callback_data="fiat_confirm_yes"),
-            InlineKeyboardButton(text=t(lang, "btn_cancel"), callback_data="fiat_confirm_no"),
+            InlineKeyboardButton(text=t(lang, "btn_cancel"),  callback_data="fiat_confirm_no"),
         ]
     ])
 
 
-def crypto_from_keyboard(exclude_ticker: str = None,
-                         exclude_network: str = None) -> InlineKeyboardMarkup:
-    """Keyboard for selecting source crypto currency."""
+async def crypto_from_keyboard(lang: str = "en",
+                                exclude_ticker: str = None,
+                                exclude_network: str = None) -> InlineKeyboardMarkup:
+    from database.db import get_currencies
+    from services.i18n import t
+    currencies = await get_currencies(crypto_only=True, active_only=True)
     buttons = []
     row = []
-    for c in CRYPTO_CURRENCIES:
+    for c in currencies:
         if c["ticker"] == exclude_ticker and c["network"] == exclude_network:
             continue
         row.append(InlineKeyboardButton(
@@ -54,16 +65,19 @@ def crypto_from_keyboard(exclude_ticker: str = None,
             row = []
     if row:
         buttons.append(row)
-    buttons.append([InlineKeyboardButton(text="⬅️ Back", callback_data="action_back")])
+    buttons.append([InlineKeyboardButton(text=t(lang, "btn_back"), callback_data="action_back")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
-def crypto_to_keyboard(exclude_ticker: str = None,
-                       exclude_network: str = None) -> InlineKeyboardMarkup:
-    """Keyboard for selecting destination crypto currency."""
+async def crypto_to_keyboard(lang: str = "en",
+                              exclude_ticker: str = None,
+                              exclude_network: str = None) -> InlineKeyboardMarkup:
+    from database.db import get_currencies
+    from services.i18n import t
+    currencies = await get_currencies(crypto_only=True, active_only=True)
     buttons = []
     row = []
-    for c in CRYPTO_CURRENCIES:
+    for c in currencies:
         if c["ticker"] == exclude_ticker and c["network"] == exclude_network:
             continue
         row.append(InlineKeyboardButton(
@@ -75,27 +89,39 @@ def crypto_to_keyboard(exclude_ticker: str = None,
             row = []
     if row:
         buttons.append(row)
-    buttons.append([InlineKeyboardButton(text="⬅️ Back", callback_data="action_back")])
+    buttons.append([InlineKeyboardButton(text=t(lang, "btn_back"), callback_data="action_back")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
-def fiat_keyboard() -> InlineKeyboardMarkup:
-    """Keyboard for selecting fiat currency."""
+async def fiat_keyboard(lang: str = "en") -> InlineKeyboardMarkup:
+    from database.db import get_currencies
+    from services.i18n import t
+    currencies = await get_currencies(fiat_only=True, active_only=True)
     buttons = []
-    for c in FIAT_CURRENCIES:
+    for c in currencies:
         buttons.append([InlineKeyboardButton(
             text=c["label"],
             callback_data=f"fiat_{c['ticker']}_{c['network']}"
         )])
-    buttons.append([InlineKeyboardButton(text="⬅️ Back", callback_data="action_back")])
+    buttons.append([InlineKeyboardButton(text=t(lang, "btn_back"), callback_data="action_back")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
-def confirm_keyboard(lang: str = "en") -> InlineKeyboardMarkup:
-    from services.i18n import t
+def language_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text=t(lang, "btn_confirm"), callback_data="confirm_yes"),
-            InlineKeyboardButton(text=t(lang, "btn_cancel"), callback_data="confirm_no"),
-        ]
+            InlineKeyboardButton(text="🇷🇺 Русский",  callback_data="lang_ru"),
+            InlineKeyboardButton(text="🇬🇧 English",  callback_data="lang_en"),
+        ],
+        [
+            InlineKeyboardButton(text="🇩🇪 Deutsch",  callback_data="lang_de"),
+            InlineKeyboardButton(text="🇫🇷 Français", callback_data="lang_fr"),
+        ],
+        [
+            InlineKeyboardButton(text="🇮🇷 فارسی",    callback_data="lang_fa"),
+            InlineKeyboardButton(text="🇸🇦 العربية",  callback_data="lang_ar"),
+        ],
+        [
+            InlineKeyboardButton(text="⬅️ Back",       callback_data="action_back"),
+        ],
     ])
