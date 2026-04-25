@@ -43,9 +43,15 @@ async def init_db():
                 sort_order INTEGER NOT NULL DEFAULT 0
             )
         """)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS blocked_users (
+                user_id INTEGER PRIMARY KEY,
+                blocked_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                reason TEXT DEFAULT ''
+            )
+        """)
         await db.commit()
 
-        # Seed default currencies if table is empty
         cursor = await db.execute("SELECT COUNT(*) FROM currencies")
         count = (await cursor.fetchone())[0]
         if count == 0:
@@ -55,17 +61,16 @@ async def init_db():
 
 
 async def _seed_currencies(db):
-    """Insert default currencies on first run."""
     defaults = [
-        ("btc",  "btc",  "BTC",           0.0001, 0, 1, 1),
-        ("eth",  "eth",  "ETH",            0.005,  0, 1, 2),
-        ("usdt", "trx",  "USDT (TRC20)",   1.0,    0, 1, 3),
-        ("usdt", "eth",  "USDT (ERC20)",  10.0,    0, 1, 4),
-        ("sol",  "sol",  "SOL",            0.1,    0, 1, 5),
-        ("bnb",  "bsc",  "BNB",            0.01,   0, 1, 6),
-        ("trx",  "trx",  "TRX",           50.0,    0, 1, 7),
-        ("usd",  "usd",  "💵 USD",        20.0,    1, 1, 8),
-        ("eur",  "eur",  "💶 EUR",        20.0,    1, 1, 9),
+        ("btc",  "btc",  "BTC",          0.0001, 0, 1, 1),
+        ("eth",  "eth",  "ETH",           0.005,  0, 1, 2),
+        ("usdt", "trx",  "USDT (TRC20)",  1.0,    0, 1, 3),
+        ("usdt", "eth",  "USDT (ERC20)", 10.0,    0, 1, 4),
+        ("sol",  "sol",  "SOL",           0.1,    0, 1, 5),
+        ("bnb",  "bsc",  "BNB",           0.01,   0, 1, 6),
+        ("trx",  "trx",  "TRX",          50.0,    0, 1, 7),
+        ("usd",  "usd",  "💵 USD",       20.0,    1, 1, 8),
+        ("eur",  "eur",  "💶 EUR",       20.0,    1, 1, 9),
     ]
     await db.executemany("""
         INSERT INTO currencies
@@ -157,6 +162,40 @@ async def get_all_swaps(limit: int = 10) -> list:
         return [dict(row) for row in rows]
 
 
+async def get_swaps_by_period(days: int | None = None,
+                               date_from: str | None = None,
+                               date_to: str | None = None,
+                               limit: int = 500) -> list:
+    """
+    Get swaps filtered by period.
+    - days=1  → today
+    - days=7  → last 7 days
+    - days=30 → last 30 days
+    - date_from/date_to → custom range (YYYY-MM-DD strings)
+    """
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        if days is not None:
+            since = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+            cursor = await db.execute("""
+                SELECT * FROM swaps
+                WHERE DATE(created_at) >= ?
+                ORDER BY created_at DESC LIMIT ?
+            """, (since, limit))
+        elif date_from and date_to:
+            cursor = await db.execute("""
+                SELECT * FROM swaps
+                WHERE DATE(created_at) BETWEEN ? AND ?
+                ORDER BY created_at DESC LIMIT ?
+            """, (date_from, date_to, limit))
+        else:
+            cursor = await db.execute(
+                "SELECT * FROM swaps ORDER BY created_at DESC LIMIT ?", (limit,)
+            )
+        rows = await cursor.fetchall()
+        return [dict(row) for row in rows]
+
+
 # ── Stats ──────────────────────────────────────────────────────────────────────
 
 async def get_stats() -> dict:
@@ -220,16 +259,11 @@ async def get_top_pairs(limit: int = 5) -> list:
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         cursor = await db.execute("""
-            SELECT
-                currency_from,
-                currency_to,
-                COUNT(*) as count,
-                SUM(amount_from) as volume
-            FROM swaps
-            WHERE status = 'finished'
+            SELECT currency_from, currency_to,
+                   COUNT(*) as count, SUM(amount_from) as volume
+            FROM swaps WHERE status = 'finished'
             GROUP BY currency_from, currency_to
-            ORDER BY count DESC
-            LIMIT ?
+            ORDER BY count DESC LIMIT ?
         """, (limit,))
         rows = await cursor.fetchall()
         return [dict(row) for row in rows]
@@ -256,6 +290,72 @@ async def get_volume_by_period(days: int) -> dict:
         return {"count": row[0], "users": row[1]}
 
 
+# ── User management ────────────────────────────────────────────────────────────
+
+async def get_all_users() -> list:
+    """All users with swap count, last swap date, blocked status."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute("""
+            SELECT
+                s.user_id,
+                COUNT(s.id)          AS swap_count,
+                MAX(s.created_at)    AS last_swap,
+                SUM(s.amount_from)   AS total_volume,
+                CASE WHEN b.user_id IS NOT NULL THEN 1 ELSE 0 END AS is_blocked
+            FROM swaps s
+            LEFT JOIN blocked_users b ON s.user_id = b.user_id
+            GROUP BY s.user_id
+            ORDER BY swap_count DESC
+        """)
+        rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
+
+
+async def get_user_swap_history(user_id: int, limit: int = 20) -> list:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute("""
+            SELECT * FROM swaps WHERE user_id = ?
+            ORDER BY created_at DESC LIMIT ?
+        """, (user_id, limit))
+        rows = await cursor.fetchall()
+        return [dict(r) for r in rows]
+
+
+async def is_user_blocked(user_id: int) -> bool:
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            "SELECT 1 FROM blocked_users WHERE user_id = ?", (user_id,)
+        )
+        return (await cursor.fetchone()) is not None
+
+
+async def block_user(user_id: int, reason: str = "") -> bool:
+    """Block user. Returns False if already blocked."""
+    if await is_user_blocked(user_id):
+        return False
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "INSERT OR IGNORE INTO blocked_users (user_id, reason) VALUES (?, ?)",
+            (user_id, reason)
+        )
+        await db.commit()
+    return True
+
+
+async def unblock_user(user_id: int) -> bool:
+    """Unblock user. Returns False if not blocked."""
+    if not await is_user_blocked(user_id):
+        return False
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute(
+            "DELETE FROM blocked_users WHERE user_id = ?", (user_id,)
+        )
+        await db.commit()
+    return True
+
+
 # ── Logs ───────────────────────────────────────────────────────────────────────
 
 async def get_recent_logs(n: int = 20) -> list[str]:
@@ -273,7 +373,6 @@ async def get_recent_logs(n: int = 20) -> list[str]:
 # ── Currency management ────────────────────────────────────────────────────────
 
 async def get_currencies(fiat_only=False, crypto_only=False, active_only=True) -> list:
-    """Get currencies with optional filters."""
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         query = "SELECT * FROM currencies WHERE 1=1"
@@ -290,7 +389,6 @@ async def get_currencies(fiat_only=False, crypto_only=False, active_only=True) -
 
 
 async def get_all_currencies_admin() -> list:
-    """All currencies including inactive — for admin panel."""
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         cursor = await db.execute(
@@ -315,7 +413,6 @@ async def add_currency(ticker: str, network: str, label: str,
 
 
 async def toggle_currency(currency_id: int) -> bool:
-    """Toggle active/inactive. Returns new state as bool."""
     async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute(
             "SELECT is_active FROM currencies WHERE id = ?", (currency_id,)
