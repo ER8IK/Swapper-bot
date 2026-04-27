@@ -7,6 +7,7 @@ def main_menu(lang: str = "en") -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text=t(lang, "btn_swap"),     callback_data="action_swap")],
         [InlineKeyboardButton(text=t(lang, "btn_buy_card"), callback_data="action_fiat")],
         [InlineKeyboardButton(text=t(lang, "btn_how"),      callback_data="action_how")],
+        [InlineKeyboardButton(text="📊 Prices", callback_data="action_prices")],
         [InlineKeyboardButton(text=t(lang, "btn_language"), callback_data="action_language")],
     ])
 
@@ -42,6 +43,12 @@ def fiat_confirm_keyboard(lang: str = "en") -> InlineKeyboardMarkup:
             InlineKeyboardButton(text=t(lang, "btn_confirm"), callback_data="fiat_confirm_yes"),
             InlineKeyboardButton(text=t(lang, "btn_cancel"),  callback_data="fiat_confirm_no"),
         ]
+    ])
+    
+def admin_back_kb():
+    """Кнопка возврата в админ-панель"""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⬅️ Back to Admin", callback_data="admin_main")]
     ])
 
 
@@ -91,6 +98,7 @@ async def crypto_to_keyboard(lang: str = "en",
         buttons.append(row)
     buttons.append([InlineKeyboardButton(text=t(lang, "btn_back"), callback_data="action_back")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
+
 
 
 async def fiat_keyboard(lang: str = "en") -> InlineKeyboardMarkup:

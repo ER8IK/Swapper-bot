@@ -4,18 +4,38 @@ from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
 
 from keyboards.inline import main_menu, back_to_menu
-from database.db import get_user_lang, set_user_lang
+from database.db import get_user_lang, ensure_user_registered, get_user_rank
 from services.i18n import t
+from services.prices import get_prices, format_prices
 
 router = Router()
 
-
 @router.message(CommandStart())
 async def cmd_start(message: Message):
-    lang = await get_user_lang(message.from_user.id)
+    user_id = message.from_user.id
+    # ✅ Регистрация пользователя в БД
+    await ensure_user_registered(user_id)
+    
+    lang = await get_user_lang(user_id)
+    # ✅ Получаем ранг
+    emoji, rank_name, swap_count = await get_user_rank(user_id)
+    
+    welcome_text = f"{t(lang, 'welcome')}\n\n{emoji} <b>Rank:</b> {rank_name} ({swap_count} swaps)"
+    
     await message.answer(
-        text=t(lang, "welcome"),
+        text=welcome_text,
         reply_markup=main_menu(lang)
+    )
+
+@router.callback_query(F.data == "action_prices")
+async def callback_prices(callback: CallbackQuery):
+    prices = await get_prices()
+    if not prices:
+        return await callback.answer("Error fetching prices.", show_alert=True)
+    
+    await callback.message.edit_text(
+        text=format_prices(prices),
+        reply_markup=back_to_menu(await get_user_lang(callback.from_user.id))
     )
 
 

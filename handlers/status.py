@@ -3,7 +3,7 @@ from aiogram.types import Message
 from aiogram.filters import Command
 
 from services.simpleswap import get_exchange
-from database.db import get_user_swaps, update_swap_status
+from database.db import get_user_swaps, update_swap_status, get_swap_by_exchange_id, get_user_lang
 from keyboards.inline import back_to_menu
 
 import logging
@@ -55,6 +55,28 @@ async def cmd_status(message: Message):
         f"Send to address:\n<code>{address_from}</code>",
         reply_markup=back_to_menu()
     )
+    
+@router.message(Command("myorder"))
+async def cmd_myorder(message: Message):
+    args = message.text.split()
+    lang = await get_user_lang(message.from_user.id)
+    
+    if len(args) < 2:
+        return await message.answer("Usage: /myorder ID_HERE")
+    
+    exchange_id = args[1]
+    swap = await get_swap_by_exchange_id(exchange_id)
+    
+    if not swap:
+        return await message.answer("Order not found.")
+    
+    text = (
+        f"📋 <b>Order {exchange_id}</b>\n"
+        f"Status: <code>{swap['status']}</code>\n"
+        f"Pair: {swap['currency_from'].upper()} ➡️ {swap['currency_to'].upper()}\n"
+        f"Amount: {swap['amount_from']} ➡️ {swap['amount_to']}"
+    )
+    await message.answer(text)
 
 
 @router.message(Command("history"))

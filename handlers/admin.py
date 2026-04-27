@@ -9,6 +9,7 @@ from aiogram.types import (
     InlineKeyboardMarkup, InlineKeyboardButton,
     BufferedInputFile
 )
+from keyboards.inline import main_menu, back_to_menu, admin_back_kb  # Добавь сюда
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -118,6 +119,22 @@ async def cmd_admin(message: Message):
         f"❌ Failed: <b>{stats['failed']}</b>",
         reply_markup=admin_main_keyboard()
     )
+
+@router.callback_query(F.data == "admin_stats")
+async def admin_stats(callback: CallbackQuery):
+    from database.db import get_stats
+    s = await get_stats()
+    
+    text = (
+        "📊 <b>Global Stats</b>\n\n"
+        f"👥 Users: {s['registrations_total']}\n"
+        f"🆕 Regs (Today/Week): {s['reg_today']} / {s['reg_week']}\n"
+        f"🔄 Total Swaps: {s['total']}\n"
+        f"✅ Finished: {s['finished']}\n"
+        f"⏳ Pending: {s['pending']}\n"
+        f"❌ Failed: {s['failed']}\n"
+    )
+    await callback.message.edit_text(text, reply_markup=admin_back_kb())
 
 
 @router.callback_query(F.data == "adm_back")

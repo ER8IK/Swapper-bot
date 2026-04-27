@@ -28,7 +28,10 @@ async def init_db():
         await db.execute("""
             CREATE TABLE IF NOT EXISTS user_settings (
                 user_id INTEGER PRIMARY KEY,
-                lang TEXT DEFAULT 'en'
+                lang TEXT DEFAULT 'en',
+                aml_accepted INTEGER DEFAULT 0,
+                aml_accepted_at TIMESTAMP,
+                registered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
         await db.execute("""
@@ -51,6 +54,15 @@ async def init_db():
             )
         """)
         await db.commit()
+
+        # Migrate: add aml columns if they don't exist yet
+        try:
+            await db.execute("ALTER TABLE user_settings ADD COLUMN aml_accepted INTEGER DEFAULT 0")
+            await db.execute("ALTER TABLE user_settings ADD COLUMN aml_accepted_at TIMESTAMP")
+            await db.execute("ALTER TABLE user_settings ADD COLUMN registered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
+            await db.commit()
+        except Exception:
+            pass  # columns already exist
 
         cursor = await db.execute("SELECT COUNT(*) FROM currencies")
         count = (await cursor.fetchone())[0]
@@ -100,6 +112,70 @@ async def set_user_lang(user_id: int, lang: str):
             ON CONFLICT(user_id) DO UPDATE SET lang = excluded.lang
         """, (user_id, lang))
         await db.commit()
+
+
+# ── AML ────────────────────────────────────────────────────────────────────────
+
+async def has_accepted_aml(user_id: int) -> bool:
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            "SELECT aml_accepted FROM user_settings WHERE user_id = ?", (user_id,)
+        )
+        row = await cursor.fetchone()
+        return bool(row[0]) if row else False
+
+
+async def accept_aml(user_id: int):
+    async with aiosqlite.connect(DB_PATH) as db:
+        now = datetime.now().isoformat()
+        await db.execute("""
+            INSERT INTO user_settings (user_id, aml_accepted, aml_accepted_at)
+            VALUES (?, 1, ?)
+            ON CONFLICT(user_id) DO UPDATE SET
+                aml_accepted = 1,
+                aml_accepted_at = excluded.aml_accepted_at
+        """, (user_id, now))
+        await db.commit()
+
+
+async def ensure_user_registered(user_id: int):
+    """Create user_settings row if not exists (called on /start)."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("""
+            INSERT OR IGNORE INTO user_settings (user_id, registered_at)
+            VALUES (?, ?)
+        """, (user_id, datetime.now().isoformat()))
+        await db.commit()
+
+
+# ── Ranks ──────────────────────────────────────────────────────────────────────
+
+def get_rank(swap_count: int) -> tuple[str, str]:
+    """Return (rank_emoji, rank_name) based on swap count."""
+    if swap_count == 0:
+        return "🆕", "Newcomer"
+    elif swap_count < 3:
+        return "🥉", "Bronze"
+    elif swap_count < 10:
+        return "🥈", "Silver"
+    elif swap_count < 25:
+        return "🥇", "Gold"
+    elif swap_count < 50:
+        return "💎", "Diamond"
+    else:
+        return "👑", "VIP"
+
+
+async def get_user_rank(user_id: int) -> tuple[str, str, int]:
+    """Return (emoji, name, swap_count)."""
+    async with aiosqlite.connect(DB_PATH) as db:
+        cursor = await db.execute(
+            "SELECT COUNT(*) FROM swaps WHERE user_id = ? AND status = 'finished'",
+            (user_id,)
+        )
+        count = (await cursor.fetchone())[0]
+    emoji, name = get_rank(count)
+    return emoji, name, count
 
 
 # ── Swaps ──────────────────────────────────────────────────────────────────────
@@ -166,13 +242,6 @@ async def get_swaps_by_period(days: int | None = None,
                                date_from: str | None = None,
                                date_to: str | None = None,
                                limit: int = 500) -> list:
-    """
-    Get swaps filtered by period.
-    - days=1  → today
-    - days=7  → last 7 days
-    - days=30 → last 30 days
-    - date_from/date_to → custom range (YYYY-MM-DD strings)
-    """
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         if days is not None:
@@ -194,6 +263,16 @@ async def get_swaps_by_period(days: int | None = None,
             )
         rows = await cursor.fetchall()
         return [dict(row) for row in rows]
+
+
+async def get_swap_by_exchange_id(exchange_id: str) -> dict | None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute(
+            "SELECT * FROM swaps WHERE exchange_id = ?", (exchange_id,)
+        )
+        row = await cursor.fetchone()
+        return dict(row) if row else None
 
 
 # ── Stats ──────────────────────────────────────────────────────────────────────
@@ -224,6 +303,10 @@ async def get_stats() -> dict:
         )
         users = (await cursor.fetchone())[0]
 
+        # Registrations
+        cursor = await db.execute("SELECT COUNT(*) FROM user_settings")
+        registrations_total = (await cursor.fetchone())[0]
+
         today     = datetime.now().strftime("%Y-%m-%d")
         week_ago  = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
         month_ago = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
@@ -243,15 +326,35 @@ async def get_stats() -> dict:
         )
         month_count = (await cursor.fetchone())[0]
 
+        # Registrations by period
+        cursor = await db.execute(
+            "SELECT COUNT(*) FROM user_settings WHERE DATE(registered_at) = ?", (today,)
+        )
+        reg_today = (await cursor.fetchone())[0]
+
+        cursor = await db.execute(
+            "SELECT COUNT(*) FROM user_settings WHERE DATE(registered_at) >= ?", (week_ago,)
+        )
+        reg_week = (await cursor.fetchone())[0]
+
+        cursor = await db.execute(
+            "SELECT COUNT(*) FROM user_settings WHERE DATE(registered_at) >= ?", (month_ago,)
+        )
+        reg_month = (await cursor.fetchone())[0]
+
         return {
-            "total":    total,
-            "finished": finished,
-            "pending":  pending,
-            "failed":   failed,
-            "users":    users,
-            "today":    today_count,
-            "week":     week_count,
-            "month":    month_count,
+            "total":               total,
+            "finished":            finished,
+            "pending":             pending,
+            "failed":              failed,
+            "users":               users,
+            "registrations_total": registrations_total,
+            "reg_today":           reg_today,
+            "reg_week":            reg_week,
+            "reg_month":           reg_month,
+            "today":               today_count,
+            "week":                week_count,
+            "month":               month_count,
         }
 
 
@@ -293,7 +396,6 @@ async def get_volume_by_period(days: int) -> dict:
 # ── User management ────────────────────────────────────────────────────────────
 
 async def get_all_users() -> list:
-    """All users with swap count, last swap date, blocked status."""
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         cursor = await db.execute("""
@@ -332,7 +434,6 @@ async def is_user_blocked(user_id: int) -> bool:
 
 
 async def block_user(user_id: int, reason: str = "") -> bool:
-    """Block user. Returns False if already blocked."""
     if await is_user_blocked(user_id):
         return False
     async with aiosqlite.connect(DB_PATH) as db:
@@ -345,7 +446,6 @@ async def block_user(user_id: int, reason: str = "") -> bool:
 
 
 async def unblock_user(user_id: int) -> bool:
-    """Unblock user. Returns False if not blocked."""
     if not await is_user_blocked(user_id):
         return False
     async with aiosqlite.connect(DB_PATH) as db:
@@ -400,6 +500,9 @@ async def get_all_currencies_admin() -> list:
 
 async def add_currency(ticker: str, network: str, label: str,
                        min_amount: float, is_fiat: bool) -> int:
+    # Clean ticker — remove $, spaces, special chars
+    ticker  = ticker.lower().replace("$", "").replace(" ", "").strip()
+    network = network.lower().replace("$", "").replace(" ", "").strip()
     async with aiosqlite.connect(DB_PATH) as db:
         cursor = await db.execute("SELECT MAX(sort_order) FROM currencies")
         max_order = (await cursor.fetchone())[0] or 0
@@ -407,7 +510,7 @@ async def add_currency(ticker: str, network: str, label: str,
             INSERT INTO currencies
                 (ticker, network, label, min_amount, is_fiat, is_active, sort_order)
             VALUES (?, ?, ?, ?, ?, 1, ?)
-        """, (ticker.lower(), network.lower(), label, min_amount, int(is_fiat), max_order + 1))
+        """, (ticker, network, label, min_amount, int(is_fiat), max_order + 1))
         await db.commit()
         return cursor.lastrowid
 

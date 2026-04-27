@@ -8,7 +8,8 @@ from states import ExchangeStates
 from services import simpleswap
 from services.currencies import get_fiat_currencies, get_crypto_currencies, get_currency, get_min_amount
 from services.limiter import limiter
-from database.db import save_swap
+from database.db import save_swap, is_user_blocked
+from handlers.aml import check_aml
 from keyboards.inline import (
     back_to_menu, cancel_keyboard, fiat_confirm_keyboard,
     fiat_keyboard, crypto_to_keyboard
@@ -33,6 +34,13 @@ async def start_fiat(callback: CallbackQuery, state: FSMContext):
     if not allowed:
         await callback.message.edit_text(reason, reply_markup=back_to_menu())
         return
+    
+    if await is_user_blocked(callback.from_user.id):
+        return await callback.answer("You are blocked.", show_alert=True)
+
+    # 2. Проверка AML
+    if not await check_aml(callback, state):
+        return  # Бот сам покажет текст AML и прервет выполнение
 
     await state.set_state(ExchangeStates.waiting_currency_from)
     await state.update_data(is_fiat=True)
