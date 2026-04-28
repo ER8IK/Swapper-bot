@@ -70,10 +70,18 @@ async def init_db():
             await _seed_currencies(db)
 
     logger.info("Database initialized")
+    
+async def update_user_rank(user_id: int, rank: str):
+    # Пример для aiosqlite / sqlite3
+    async with aiosqlite.connect("swaps.db") as db:
+        await db.execute("UPDATE users SET rank = ? WHERE user_id = ?", (rank, user_id))
+        await db.commit()
+        return True
 
 
 async def _seed_currencies(db):
     defaults = [
+        # CRYPTO
         ("btc",  "btc",  "BTC",          0.0001, 0, 1, 1),
         ("eth",  "eth",  "ETH",           0.005,  0, 1, 2),
         ("usdt", "trx",  "USDT (TRC20)",  1.0,    0, 1, 3),
@@ -81,6 +89,11 @@ async def _seed_currencies(db):
         ("sol",  "sol",  "SOL",           0.1,    0, 1, 5),
         ("bnb",  "bsc",  "BNB",           0.01,   0, 1, 6),
         ("trx",  "trx",  "TRX",          50.0,    0, 1, 7),
+        ("xmr",  "xmr",  "XMR",           0.1,    0, 1, 5),
+        ("usdc", "matic", "USDC (Polygon)", 10.0,  0, 1, 6), 
+        ("usdt", "matic", "USDT (Polygon)", 10.0,  0, 1, 7),
+        
+        # FIAT
         ("usd",  "usd",  "💵 USD",       20.0,    1, 1, 8),
         ("eur",  "eur",  "💶 EUR",       20.0,    1, 1, 9),
     ]

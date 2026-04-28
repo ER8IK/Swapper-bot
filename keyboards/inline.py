@@ -6,6 +6,7 @@ def main_menu(lang: str = "en") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=t(lang, "btn_swap"),     callback_data="action_swap")],
         [InlineKeyboardButton(text=t(lang, "btn_buy_card"), callback_data="action_fiat")],
+        [InlineKeyboardButton(text="📜 My History",         callback_data="action_history")],
         [InlineKeyboardButton(text=t(lang, "btn_how"),      callback_data="action_how")],
         [InlineKeyboardButton(text="📊 Prices", callback_data="action_prices")],
         [InlineKeyboardButton(text=t(lang, "btn_language"), callback_data="action_language")],

@@ -21,6 +21,7 @@ from database.db import (
     update_currency_min, delete_currency,
     get_all_users, get_user_swap_history,
     is_user_blocked, block_user, unblock_user,
+    update_user_rank
 )
 from config import ADMIN_ID
 
@@ -135,6 +136,48 @@ async def admin_stats(callback: CallbackQuery):
         f"❌ Failed: {s['failed']}\n"
     )
     await callback.message.edit_text(text, reply_markup=admin_back_kb())
+    
+# 1. Вызываем меню управления юзером (через команду)
+@router.message(F.text.startswith("/user_manage"))
+async def admin_manage_user(message: Message):
+    # Проверка, что пишет админ (можешь добавить проверку ID)
+    try:
+        parts = message.text.split()
+        if len(parts) < 2:
+            return await message.answer("Usage: <code>/user_manage [USER_ID]</code>")
+            
+        target_id = int(parts[1])
+        
+        # Клавиатура с выбором ранга
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [
+                InlineKeyboardButton(text="🎖 VIP", callback_data=f"set_rank_{target_id}_vip"),
+                InlineKeyboardButton(text="🐋 Whale", callback_data=f"set_rank_{target_id}_whale")
+            ],
+            [InlineKeyboardButton(text="👤 Standard", callback_data=f"set_rank_{target_id}_standard")],
+            [InlineKeyboardButton(text="❌ Block User", callback_data=f"admin_block_{target_id}")]
+        ])
+        
+        await message.answer(f"⚙️ <b>Managing User:</b> <code>{target_id}</code>\nSelect action:", reply_markup=kb)
+    except ValueError:
+        await message.answer("❌ Invalid User ID. Must be a number.")
+
+# 2. Обрабатываем нажатие кнопки смены ранга
+@router.callback_query(F.data.startswith("set_rank_"))
+async def admin_set_rank(callback: CallbackQuery):
+    # data format: set_rank_12345678_vip
+    parts = callback.data.split("_")
+    target_id = int(parts[2])
+    new_rank = parts[3]
+    
+    # Обновляем в БД
+    success = await update_user_rank(target_id, new_rank)
+    
+    if success:
+        await callback.answer(f"✅ Success! Rank set to {new_rank.upper()}", show_alert=True)
+        await callback.message.edit_text(f"✅ User <code>{target_id}</code> updated to <b>{new_rank.upper()}</b>")
+    else:
+        await callback.answer("❌ Error updating database", show_alert=True)
 
 
 @router.callback_query(F.data == "adm_back")
