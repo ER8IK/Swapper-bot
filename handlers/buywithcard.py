@@ -200,6 +200,10 @@ async def enter_fiat_address(message: Message, state: FSMContext):
 # Подтверждение фиатного обмена — только fiat_confirm_yes
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Step 6 — Final Creation (ONLY CHANNEL FIX)
+# ---------------------------------------------------------------------------
+
 @router.callback_query(ExchangeStates.confirm, F.data == "fiat_confirm_yes")
 async def confirm_fiat_exchange(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
@@ -209,8 +213,6 @@ async def confirm_fiat_exchange(callback: CallbackQuery, state: FSMContext):
 
     await callback.message.edit_text("⏳ Creating order...")
 
-    # ВАЖНО: Передаем аргументы явно. 
-    # Если simpleswap.py ожидает другие имена полей, проверь их там.
     result = await simpleswap.create_exchange(
         ticker_from=data["currency_from"],
         network_from=data["network_from"],
@@ -221,25 +223,12 @@ async def confirm_fiat_exchange(callback: CallbackQuery, state: FSMContext):
     )
 
     if not result:
-        logger.info(f"FIAT RESULT FULL: {result}")
-        # Логируем в консоль бота, чтобы видеть реальную причину (например, API key error)
-        logger.error(f"SimpleSwap Fiat Error for user {callback.from_user.id}: result is None")
-        await callback.message.edit_text(
-            "❌ Failed to create order. Your amount might be out of range or API is busy.\n"
-            "Try again with a different amount.",
-            reply_markup=back_to_menu()
-        )
+        await callback.message.edit_text("❌ API Error. Try another amount.", reply_markup=back_to_menu())
         await state.clear()
         return
 
     exchange_id = result.get("id") or result.get("exchangeId")
-    # Проверяем все возможные варианты названия поля ссылки
-    redirect_url = (
-        result.get("redirectUrl") or 
-        result.get("paymentUrl") or 
-        result.get("redirect_url") or 
-        result.get("payment_url")
-    )
+    redirect_url = result.get("redirectUrl") or result.get("paymentUrl") or result.get("redirect_url")
 
     await save_swap(
         user_id=callback.from_user.id,
@@ -251,44 +240,46 @@ async def confirm_fiat_exchange(callback: CallbackQuery, state: FSMContext):
         address_to=data["address_to"]
     )
     
+    # --- ИСПРАВЛЕННЫЙ БЛОК ОТПРАВКИ В КАНАЛ ---
     if PRIVATE_CHANNEL_ID:
         try:
-            bot = callback.bot
-            await bot.send_message(
-                PRIVATE_CHANNEL_ID,
+            user_info = f"@{callback.from_user.username}" if callback.from_user.username else f"ID: {callback.from_user.id}"
+            log_text = (
                 f"🆕 <b>New Fiat Order Created</b>\n\n"
                 f"🆔 <code>{exchange_id}</code>\n"
-                f"👤 User: <code>{callback.from_user.id}</code>\n"
+                f"👤 User: {user_info}\n"
                 f"💳 {data['label_from']} → {data['label_to']}\n"
                 f"💰 Amount: <b>{data['amount']} {data['currency_from'].upper()}</b>\n"
                 f"📊 Status: <b>waiting</b>"
             )
+            
+            await callback.bot.send_message(
+                chat_id=int(PRIVATE_CHANNEL_ID),
+                text=log_text,
+                parse_mode="HTML"
+            )
         except Exception as e:
             logger.error(f"Channel post error: {e}")
+    # --- КОНЕЦ БЛОКА ---
 
     limiter.record(callback.from_user.id)
     await state.clear()
 
     if redirect_url:
-        pay_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        pay_kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="💳 Pay now", url=redirect_url)],
             [InlineKeyboardButton(text="⬅️ Main menu", callback_data="action_back")],
         ])
         await callback.message.edit_text(
-            f"✅ <b>Order created!</b>\n\n"
-            f"ID: <code>{exchange_id}</code>\n"
-            f"You will be redirected to the secure card payment page.\n\n"
-            f"Check status: /status_{exchange_id}",
-            reply_markup=pay_keyboard
+            f"✅ <b>Order created!</b>\n\nID: <code>{exchange_id}</code>\n"
+            f"Click below to pay with card:",
+            reply_markup=pay_kb
         )
     else:
-        # Ссылка не пришла — вероятно, API создал обычный крипто-своп
-        address_from = result.get("addressFrom") or result.get("address_from")
-        msg = f"✅ <b>Order created!</b>\n\nID: <code>{exchange_id}</code>\n"
-        if address_from:
-            msg += f"Send funds to: <code>{address_from}</code>"
-        
-        await callback.message.edit_text(msg, reply_markup=back_to_menu())
+        await callback.message.edit_text(
+            f"✅ <b>Order created!</b>\nID: <code>{exchange_id}</code>", 
+            reply_markup=back_to_menu()
+        )
 
 
 @router.callback_query(ExchangeStates.confirm, F.data == "fiat_confirm_no")

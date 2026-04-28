@@ -311,12 +311,13 @@ async def confirm_exchange(callback: CallbackQuery, state: FSMContext):
         address_to=data["address_to"]
     )
 
+    # Находим этот блок в Step 6
     if PRIVATE_CHANNEL_ID:
         try:
-            from aiogram import Bot
-            bot = callback.bot
-            await bot.send_message(
-                PRIVATE_CHANNEL_ID,
+            # Превращаем в число, если вдруг это строка
+            channel_id = int(PRIVATE_CHANNEL_ID) 
+            
+            text = (
                 f"🆕 <b>New Exchange Created</b>\n\n"
                 f"🆔 <code>{exchange_id}</code>\n"
                 f"👤 User: <code>{callback.from_user.id}</code>\n"
@@ -324,6 +325,11 @@ async def confirm_exchange(callback: CallbackQuery, state: FSMContext):
                 f"💰 Amount: <b>{data['amount']} {data['currency_from'].upper()}</b>\n"
                 f"📊 Status: <b>waiting</b>"
             )
+            
+            # Используем напрямую bot из callback
+            await callback.bot.send_message(chat_id=channel_id, text=text, parse_mode="HTML")
+            logger.info(f"Successfully sent log to channel {channel_id}")
+            
         except Exception as e:
             logger.error(f"Channel post error: {e}")
 
