@@ -26,7 +26,6 @@ ADDRESS_MIN_LENGTH = {
     "sol": 32, "bnb": 42, "trx": 34,
 }
 
-
 @router.callback_query(F.data == "action_fiat")
 async def start_fiat(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
@@ -39,15 +38,17 @@ async def start_fiat(callback: CallbackQuery, state: FSMContext):
     if await is_user_blocked(callback.from_user.id):
         return await callback.answer("You are blocked.", show_alert=True)
 
-    # 2. Проверка AML
+    # Проверка AML
     if not await check_aml(callback, state):
-        return  # Бот сам покажет текст AML и прервет выполнение
+        return
 
     await state.set_state(ExchangeStates.waiting_currency_from)
     await state.update_data(is_fiat=True)
+    
+    # Исправлено: добавлен await
     await callback.message.edit_text(
         "💳 <b>Buy crypto with card</b>\n\nChoose your payment currency:",
-        reply_markup= await fiat_keyboard()
+        reply_markup=await fiat_keyboard()
     )
 
 
@@ -68,9 +69,11 @@ async def choose_fiat(callback: CallbackQuery, state: FSMContext):
         label_from=currency["label"]
     )
     await state.set_state(ExchangeStates.waiting_currency_to)
+    
+    # Исправлено: добавлен await
     await callback.message.edit_text(
         f"✅ Paying with: <b>{currency['label']}</b>\n\nChoose crypto to receive:",
-        reply_markup=crypto_to_keyboard()
+        reply_markup=await crypto_to_keyboard()
     )
 
 
@@ -79,12 +82,12 @@ async def choose_crypto_for_fiat(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
     data = await state.get_data()
     if not data.get("is_fiat"):
-        return  # не наш хендлер — пусть exchange.py обрабатывает
+        return
 
     parts = callback.data.split("_")
     ticker = parts[1]
     network = parts[2]
-    currency =  await get_currency(ticker, network)
+    currency = await get_currency(ticker, network)
     if not currency:
         await callback.answer("Unknown currency", show_alert=True)
         return
@@ -196,14 +199,6 @@ async def enter_fiat_address(message: Message, state: FSMContext):
     )
 
 
-# ---------------------------------------------------------------------------
-# Подтверждение фиатного обмена — только fiat_confirm_yes
-# ---------------------------------------------------------------------------
-
-# ---------------------------------------------------------------------------
-# Step 6 — Final Creation (ONLY CHANNEL FIX)
-# ---------------------------------------------------------------------------
-
 @router.callback_query(ExchangeStates.confirm, F.data == "fiat_confirm_yes")
 async def confirm_fiat_exchange(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
@@ -240,7 +235,7 @@ async def confirm_fiat_exchange(callback: CallbackQuery, state: FSMContext):
         address_to=data["address_to"]
     )
     
-    # --- ИСПРАВЛЕННЫЙ БЛОК ОТПРАВКИ В КАНАЛ ---
+    # Блок отправки в канал
     if PRIVATE_CHANNEL_ID:
         try:
             user_info = f"@{callback.from_user.username}" if callback.from_user.username else f"ID: {callback.from_user.id}"
@@ -260,7 +255,6 @@ async def confirm_fiat_exchange(callback: CallbackQuery, state: FSMContext):
             )
         except Exception as e:
             logger.error(f"Channel post error: {e}")
-    # --- КОНЕЦ БЛОКА ---
 
     limiter.record(callback.from_user.id)
     await state.clear()
