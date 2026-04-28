@@ -31,6 +31,8 @@ async def init_db():
                 lang TEXT DEFAULT 'en',
                 aml_accepted INTEGER DEFAULT 0,
                 aml_accepted_at TIMESTAMP,
+                swap_count INTEGER DEFAULT 0,
+                rank TEXT DEFAULT 'standard',
                 registered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
@@ -55,14 +57,21 @@ async def init_db():
         """)
         await db.commit()
 
-        # Migrate: add aml columns if they don't exist yet
-        try:
-            await db.execute("ALTER TABLE user_settings ADD COLUMN aml_accepted INTEGER DEFAULT 0")
-            await db.execute("ALTER TABLE user_settings ADD COLUMN aml_accepted_at TIMESTAMP")
-            await db.execute("ALTER TABLE user_settings ADD COLUMN registered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
-            await db.commit()
-        except Exception:
-            pass  # columns already exist
+        # Migrate: add columns if they don't exist yet
+        migrations = [
+            ("aml_accepted", "INTEGER DEFAULT 0"),
+            ("aml_accepted_at", "TIMESTAMP"),
+            ("registered_at", "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"),
+            ("swap_count", "INTEGER DEFAULT 0"),
+            ("rank", "TEXT DEFAULT 'standard'")
+        ]
+        
+        for col_name, col_type in migrations:
+            try:
+                await db.execute(f"ALTER TABLE user_settings ADD COLUMN {col_name} {col_type}")
+                await db.commit()
+            except Exception:
+                pass  # column already exists
 
         cursor = await db.execute("SELECT COUNT(*) FROM currencies")
         count = (await cursor.fetchone())[0]
@@ -72,16 +81,16 @@ async def init_db():
     logger.info("Database initialized")
     
 async def update_user_rank(user_id: int, rank: str):
-    # Пример для aiosqlite / sqlite3
-    async with aiosqlite.connect("swaps.db") as db:
-        await db.execute("UPDATE users SET rank = ? WHERE user_id = ?", (rank, user_id))
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("INSERT OR IGNORE INTO user_settings (user_id) VALUES (?)", (user_id,))
+        await db.execute("UPDATE user_settings SET rank = ? WHERE user_id = ?", (rank, user_id))
         await db.commit()
         return True
     
 async def update_user_swaps_count(user_id: int, count: int):
-    async with aiosqlite.connect("swaps.db") as db:
-        # Предполагаем, что колонка называется swap_count или как ты её назвал в таблице users
-        await db.execute("UPDATE users SET swap_count = ? WHERE user_id = ?", (count, user_id))
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("INSERT OR IGNORE INTO user_settings (user_id) VALUES (?)", (user_id,))
+        await db.execute("UPDATE user_settings SET swap_count = ? WHERE user_id = ?", (count, user_id))
         await db.commit()
         return True
 
@@ -189,6 +198,17 @@ def get_rank(swap_count: int) -> tuple[str, str]:
 async def get_user_rank(user_id: int) -> tuple[str, str, int]:
     """Return (emoji, name, swap_count)."""
     async with aiosqlite.connect(DB_PATH) as db:
+        # Проверяем ручной ранг из настроек
+        cursor = await db.execute("SELECT rank, swap_count FROM user_settings WHERE user_id = ?", (user_id,))
+        row = await cursor.fetchone()
+        
+        if row and row[0] and row[0] != 'standard':
+            # Если установлен ручной ранг (VIP/Whale)
+            rank_name = row[0].capitalize()
+            rank_emoji = "👑" if rank_name == "Vip" else "🐋"
+            return rank_emoji, rank_name, row[1]
+            
+        # Иначе считаем по количеству обменов
         cursor = await db.execute(
             "SELECT COUNT(*) FROM swaps WHERE user_id = ? AND status = 'finished'",
             (user_id,)
@@ -215,12 +235,12 @@ async def save_swap(user_id: int, exchange_id: str, currency_from: str,
         return cursor.lastrowid
 
 
-async def get_user_swaps(user_id: int) -> list:
+async def get_user_swaps(user_id: int, limit: int = 5) -> list:
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         cursor = await db.execute(
-            "SELECT * FROM swaps WHERE user_id = ? ORDER BY created_at DESC LIMIT 5",
-            (user_id,)
+            "SELECT * FROM swaps WHERE user_id = ? ORDER BY created_at DESC LIMIT ?",
+            (user_id, limit)
         )
         rows = await cursor.fetchall()
         return [dict(row) for row in rows]
@@ -418,20 +438,23 @@ async def get_volume_by_period(days: int) -> dict:
 async def get_all_users() -> list:
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
-        cursor = await db.execute("""
-            SELECT
-                s.user_id,
-                COUNT(s.id)          AS swap_count,
-                MAX(s.created_at)    AS last_swap,
-                SUM(s.amount_from)   AS total_volume,
+        # Берем всех из user_settings и джойним статистику из swaps
+        query = """
+            SELECT 
+                u.user_id, 
+                u.swap_count, 
+                u.rank,
+                u.registered_at,
+                (SELECT SUM(amount_from) FROM swaps WHERE user_id = u.user_id AND status = 'finished') as total_volume,
+                (SELECT MAX(created_at) FROM swaps WHERE user_id = u.user_id) as last_swap,
                 CASE WHEN b.user_id IS NOT NULL THEN 1 ELSE 0 END AS is_blocked
-            FROM swaps s
-            LEFT JOIN blocked_users b ON s.user_id = b.user_id
-            GROUP BY s.user_id
-            ORDER BY swap_count DESC
-        """)
-        rows = await cursor.fetchall()
-        return [dict(r) for r in rows]
+            FROM user_settings u
+            LEFT JOIN blocked_users b ON u.user_id = b.user_id
+            ORDER BY u.registered_at DESC
+        """
+        async with db.execute(query) as cursor:
+            rows = await cursor.fetchall()
+            return [dict(r) for r in rows]
 
 
 async def get_user_swap_history(user_id: int, limit: int = 20) -> list:
@@ -520,7 +543,6 @@ async def get_all_currencies_admin() -> list:
 
 async def add_currency(ticker: str, network: str, label: str,
                        min_amount: float, is_fiat: bool) -> int:
-    # Clean ticker — remove $, spaces, special chars
     ticker  = ticker.lower().replace("$", "").replace(" ", "").strip()
     network = network.lower().replace("$", "").replace(" ", "").strip()
     async with aiosqlite.connect(DB_PATH) as db:
