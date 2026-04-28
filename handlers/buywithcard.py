@@ -47,7 +47,7 @@ async def start_fiat(callback: CallbackQuery, state: FSMContext):
     await state.update_data(is_fiat=True)
     await callback.message.edit_text(
         "💳 <b>Buy crypto with card</b>\n\nChoose your payment currency:",
-        reply_markup=fiat_keyboard()
+        reply_markup= await fiat_keyboard()
     )
 
 
