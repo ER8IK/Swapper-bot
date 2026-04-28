@@ -9,7 +9,7 @@ from aiogram.types import (
     InlineKeyboardMarkup, InlineKeyboardButton,
     BufferedInputFile
 )
-from keyboards.inline import main_menu, back_to_menu, admin_back_kb  # Добавь сюда
+from keyboards.inline import main_menu, back_to_menu, admin_back_kb
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -21,7 +21,7 @@ from database.db import (
     update_currency_min, delete_currency,
     get_all_users, get_user_swap_history,
     is_user_blocked, block_user, unblock_user,
-    update_user_rank
+    update_user_swaps_count  # Проверь, что добавил эту функцию в db.py
 )
 from config import ADMIN_ID
 
@@ -101,6 +101,24 @@ def users_menu_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="⬅️ Back",            callback_data="adm_back")],
     ])
 
+# Вспомогательная функция для меню управления рангами
+def get_user_manage_kb(target_id: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="🥈 Silver (10)", callback_data=f"set_swaps_{target_id}_10"),
+            InlineKeyboardButton(text="🥇 Gold (25)", callback_data=f"set_swaps_{target_id}_25")
+        ],
+        [
+            InlineKeyboardButton(text="💎 Diamond (50)", callback_data=f"set_swaps_{target_id}_50"),
+            InlineKeyboardButton(text="👑 VIP (100)", callback_data=f"set_swaps_{target_id}_100")
+        ],
+        [
+            InlineKeyboardButton(text="🚫 Block", callback_data=f"adm_block_confirm_{target_id}"),
+            InlineKeyboardButton(text="✅ Unblock", callback_data=f"adm_unblock_confirm_{target_id}")
+        ],
+        [InlineKeyboardButton(text="⬅️ Back", callback_data="adm_users_menu")]
+    ])
+
 
 # ── /admin ────────────────────────────────────────────────────────────────────
 
@@ -140,44 +158,38 @@ async def admin_stats(callback: CallbackQuery):
 # 1. Вызываем меню управления юзером (через команду)
 @router.message(F.text.startswith("/user_manage"))
 async def admin_manage_user(message: Message):
-    # Проверка, что пишет админ (можешь добавить проверку ID)
+    if not is_admin(message.from_user.id): return
     try:
         parts = message.text.split()
         if len(parts) < 2:
             return await message.answer("Usage: <code>/user_manage [USER_ID]</code>")
-            
         target_id = int(parts[1])
-        
-        # Клавиатура с выбором ранга
-        kb = InlineKeyboardMarkup(inline_keyboard=[
-            [
-                InlineKeyboardButton(text="🎖 VIP", callback_data=f"set_rank_{target_id}_vip"),
-                InlineKeyboardButton(text="🐋 Whale", callback_data=f"set_rank_{target_id}_whale")
-            ],
-            [InlineKeyboardButton(text="👤 Standard", callback_data=f"set_rank_{target_id}_standard")],
-            [InlineKeyboardButton(text="❌ Block User", callback_data=f"admin_block_{target_id}")]
-        ])
-        
-        await message.answer(f"⚙️ <b>Managing User:</b> <code>{target_id}</code>\nSelect action:", reply_markup=kb)
+        await message.answer(f"⚙️ <b>Managing User:</b> <code>{target_id}</code>", reply_markup=get_user_manage_kb(target_id))
     except ValueError:
-        await message.answer("❌ Invalid User ID. Must be a number.")
+        await message.answer("❌ Invalid User ID.")
 
-# 2. Обрабатываем нажатие кнопки смены ранга
-@router.callback_query(F.data.startswith("set_rank_"))
-async def admin_set_rank(callback: CallbackQuery):
-    # data format: set_rank_12345678_vip
+# 2. Обработка кнопки из канала
+@router.callback_query(F.data.startswith("admin_manage_"))
+async def admin_manage_callback(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id): return
+    target_id = int(callback.data.split("_")[2])
+    await callback.message.answer(f"⚙️ <b>Managing User:</b> <code>{target_id}</code>", reply_markup=get_user_manage_kb(target_id))
+    await callback.answer()
+
+# 3. Установка ранга (сделок)
+@router.callback_query(F.data.startswith("set_swaps_"))
+async def admin_set_swaps(callback: CallbackQuery):
+    if not is_admin(callback.from_user.id): return
     parts = callback.data.split("_")
     target_id = int(parts[2])
-    new_rank = parts[3]
+    count = int(parts[3])
     
-    # Обновляем в БД
-    success = await update_user_rank(target_id, new_rank)
-    
+    success = await update_user_swaps_count(target_id, count)
     if success:
-        await callback.answer(f"✅ Success! Rank set to {new_rank.upper()}", show_alert=True)
-        await callback.message.edit_text(f"✅ User <code>{target_id}</code> updated to <b>{new_rank.upper()}</b>")
+        await callback.answer(f"✅ User rank updated!", show_alert=True)
+        await callback.message.edit_text(f"✅ User <code>{target_id}</code> now has <b>{count}</b> swaps.")
     else:
-        await callback.answer("❌ Error updating database", show_alert=True)
+        await callback.answer("❌ DB Error", show_alert=True)
 
 
 @router.callback_query(F.data == "adm_back")
@@ -555,6 +567,7 @@ def _user_action_keyboard(user_id: int, is_blocked: bool) -> InlineKeyboardMarku
         )
     return InlineKeyboardMarkup(inline_keyboard=[
         [toggle_btn],
+        [InlineKeyboardButton(text="⚙️ Manage Rank", callback_data=f"admin_manage_{user_id}")], # Добавил быстрый переход к рангам
         [InlineKeyboardButton(text="⬅️ Back", callback_data="adm_users_menu")],
     ])
 

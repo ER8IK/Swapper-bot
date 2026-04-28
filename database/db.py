@@ -77,6 +77,13 @@ async def update_user_rank(user_id: int, rank: str):
         await db.execute("UPDATE users SET rank = ? WHERE user_id = ?", (rank, user_id))
         await db.commit()
         return True
+    
+async def update_user_swaps_count(user_id: int, count: int):
+    async with aiosqlite.connect("swaps.db") as db:
+        # Предполагаем, что колонка называется swap_count или как ты её назвал в таблице users
+        await db.execute("UPDATE users SET swap_count = ? WHERE user_id = ?", (count, user_id))
+        await db.commit()
+        return True
 
 
 async def _seed_currencies(db):
