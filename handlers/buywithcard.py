@@ -4,6 +4,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command
 
+from config import PRIVATE_CHANNEL_ID
 from states import ExchangeStates
 from services import simpleswap
 from services.currencies import get_fiat_currencies, get_crypto_currencies, get_currency, get_min_amount
@@ -56,7 +57,7 @@ async def choose_fiat(callback: CallbackQuery, state: FSMContext):
     parts = callback.data.split("_")
     ticker = parts[1]
     network = parts[2]
-    currency = get_currency(ticker, network)
+    currency = await get_currency(ticker, network)
     if not currency:
         await callback.answer("Unknown currency", show_alert=True)
         return
@@ -83,7 +84,7 @@ async def choose_crypto_for_fiat(callback: CallbackQuery, state: FSMContext):
     parts = callback.data.split("_")
     ticker = parts[1]
     network = parts[2]
-    currency = get_currency(ticker, network)
+    currency =  await get_currency(ticker, network)
     if not currency:
         await callback.answer("Unknown currency", show_alert=True)
         return
@@ -94,7 +95,7 @@ async def choose_crypto_for_fiat(callback: CallbackQuery, state: FSMContext):
         label_to=currency["label"]
     )
     await state.set_state(ExchangeStates.waiting_amount)
-    min_amount = get_min_amount(data["currency_from"], data["network_from"])
+    min_amount = await get_min_amount(data["currency_from"], data["network_from"])
 
     await callback.message.edit_text(
         f"✅ Receiving: <b>{currency['label']}</b>\n\n"
@@ -122,7 +123,7 @@ async def enter_fiat_amount(message: Message, state: FSMContext):
         )
         return
 
-    min_amount = get_min_amount(data["currency_from"], data["network_from"])
+    min_amount = await get_min_amount(data["currency_from"], data["network_from"])
     if amount < min_amount:
         await message.answer(
             f"⚠️ Minimum amount: <b>{min_amount} {data['currency_from'].upper()}</b>\n\n"
@@ -249,6 +250,21 @@ async def confirm_fiat_exchange(callback: CallbackQuery, state: FSMContext):
         amount_to=data["amount_to"],
         address_to=data["address_to"]
     )
+    
+    if PRIVATE_CHANNEL_ID:
+        try:
+            bot = callback.bot
+            await bot.send_message(
+                PRIVATE_CHANNEL_ID,
+                f"🆕 <b>New Fiat Order Created</b>\n\n"
+                f"🆔 <code>{exchange_id}</code>\n"
+                f"👤 User: <code>{callback.from_user.id}</code>\n"
+                f"💳 {data['label_from']} → {data['label_to']}\n"
+                f"💰 Amount: <b>{data['amount']} {data['currency_from'].upper()}</b>\n"
+                f"📊 Status: <b>waiting</b>"
+            )
+        except Exception as e:
+            logger.error(f"Channel post error: {e}")
 
     limiter.record(callback.from_user.id)
     await state.clear()

@@ -4,7 +4,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command, Filter
 import re
-
+from config import PRIVATE_CHANNEL_ID
 from states import ExchangeStates
 from services import simpleswap
 # Функции теперь async, поэтому вызываем их с await ниже
@@ -310,6 +310,22 @@ async def confirm_exchange(callback: CallbackQuery, state: FSMContext):
         amount_to=data["amount_to"],
         address_to=data["address_to"]
     )
+
+    if PRIVATE_CHANNEL_ID:
+        try:
+            from aiogram import Bot
+            bot = callback.bot
+            await bot.send_message(
+                PRIVATE_CHANNEL_ID,
+                f"🆕 <b>New Exchange Created</b>\n\n"
+                f"🆔 <code>{exchange_id}</code>\n"
+                f"👤 User: <code>{callback.from_user.id}</code>\n"
+                f"🔄 {data['label_from']} → {data['label_to']}\n"
+                f"💰 Amount: <b>{data['amount']} {data['currency_from'].upper()}</b>\n"
+                f"📊 Status: <b>waiting</b>"
+            )
+        except Exception as e:
+            logger.error(f"Channel post error: {e}")
 
     limiter.record(callback.from_user.id)
     await state.clear()
