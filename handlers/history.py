@@ -10,7 +10,7 @@ async def show_history(callback: CallbackQuery):
     await callback.answer()
     
     # Получаем последние 5-10 обменов пользователя
-    swaps = await get_user_swaps(callback.from_user.id, limit=7)
+    swaps = await get_user_swaps(callback.from_user.id)
     
     if not swaps:
         await callback.message.edit_text(
